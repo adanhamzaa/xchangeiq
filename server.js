@@ -1,10 +1,13 @@
+bash
+
+cat > /mnt/user-data/outputs/server.js << 'EOF'
 const https = require('https');
 const http = require('http');
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY;
 const CHATWOOT_URL = process.env.CHATWOOT_URL || 'chatwoot-production-5bb4.up.railway.app';
 const CHATWOOT_TOKEN = process.env.CHATWOOT_TOKEN;
-const GOOGLE_SHEET_URL = process.env.GOOGLE_SHEET_URL || 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQbnna-vcEFstuBQvVLP1bFLEveKMrJ1DAeWzVjHKi_WAJnDvJzg4KTlWWYNOcc8hffAayMBLYgYLoR/pub?gid=0&single=true&output=csv';
+const GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQbnna-vcEFstuBQvVLP1bFLEveKMrJ1DAeWzVjHKi_WAJnDvJzg4KTlWWYNOcc8hffAayMBLYgYLoR/pub?gid=0&single=true&output=csv';
 
 const conversations = {};
 
@@ -98,6 +101,9 @@ function sendChatwootMessage(conversationId, content, isPrivate) {
 }
 
 const server = http.createServer(async function(req, res) {
+  // Log ALL incoming requests
+  console.log('Request received:', req.method, req.url);
+
   if (req.method === 'POST' && req.url === '/webhook') {
     let body = '';
     req.on('data', function(chunk) { body += chunk; });
@@ -105,15 +111,23 @@ const server = http.createServer(async function(req, res) {
       res.writeHead(200);
       res.end('OK');
 
+      console.log('Webhook received, body length:', body.length);
+
       try {
         const payload = JSON.parse(body);
+        console.log('Event:', payload.event, 'Type:', payload.message_type);
 
-        if (payload.event !== 'message_created' || payload.message_type !== 'incoming') return;
+        if (payload.event !== 'message_created' || payload.message_type !== 'incoming') {
+          console.log('Skipping - not incoming message');
+          return;
+        }
 
         const currentMessage = String(payload.content || '').trim();
         const conversationId = payload.conversation && payload.conversation.id;
         const senderName = String((payload.sender && payload.sender.name) || 'friend').replace(/[\n\r"\\]/g, ' ');
         const customerId = String((payload.sender && payload.sender.id) || conversationId);
+
+        console.log('Processing message:', currentMessage, 'from:', senderName);
 
         if (!currentMessage || !conversationId) return;
 
@@ -134,12 +148,14 @@ const server = http.createServer(async function(req, res) {
         const system = 'You are Hassan, warm and friendly forex assistant at AfriDesk East Africa. Use customer name naturally. Build rapport. Use conversation history fully - never ask for info already given. If customer sends a number after discussing a currency calculate immediately. Reply naturally in customer language. Calculate KES using rates in [rates:...]. VIP: amount >= 5000 USD or competitor offer or urgency = is_vip true, tell teller will contact. Return ONLY valid JSON: {"intent":"","direction":"buy|sell|null","currency":"ISO or null","amount":null,"is_vip":false,"reply":"your natural response"}';
 
         const claudeText = await callClaude(messages, system);
+        console.log('Claude response received');
         const clean = claudeText.replace(/```json|```/g, '').trim();
 
         let aiData = {};
         try {
           aiData = JSON.parse(clean);
         } catch(e) {
+          console.log('JSON parse error:', e.message, 'Text:', clean.substring(0, 100));
           aiData = { reply: "I'm here to help! How can I assist you with forex today?", is_vip: false };
         }
 
@@ -156,6 +172,7 @@ const server = http.createServer(async function(req, res) {
         }
 
         await sendChatwootMessage(conversationId, reply, false);
+        console.log('Reply sent successfully');
 
       } catch(err) {
         console.error('Error:', err.message);
@@ -165,8 +182,8 @@ const server = http.createServer(async function(req, res) {
     res.writeHead(200);
     res.end('AfriDesk API Running!');
   } else {
-    res.writeHead(404);
-    res.end('Not found');
+    res.writeHead(200);
+    res.end('OK');
   }
 });
 
@@ -174,3 +191,8 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, function() {
   console.log('AfriDesk API running on port ' + PORT);
 });
+EOF
+echo "Done!"
+Output
+
+Done!
