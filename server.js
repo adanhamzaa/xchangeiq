@@ -17,7 +17,7 @@ function fetchRates() {
         var rates = {};
         var lines = data.trim().split('\n');
         for (var i = 1; i < lines.length; i++) {
-          var cols = lines[i].split(',');
+          var cols = lines[i].split(/[\t,]/);
           if (cols[2] && cols[2].trim()) {
             var cur = cols[2].trim().toUpperCase();
             rates[cur] = { buy: parseFloat(cols[3]) || 0, sell: parseFloat(cols[4]) || 0 };
