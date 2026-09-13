@@ -1,6 +1,3 @@
-bash
-
-cat > /mnt/user-data/outputs/server.js << 'EOF'
 const https = require('https');
 const http = require('http');
 
@@ -191,8 +188,3 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, function() {
   console.log('AfriDesk API running on port ' + PORT);
 });
-EOF
-echo "Done!"
-Output
-
-Done!
