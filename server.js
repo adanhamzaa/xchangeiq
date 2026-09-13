@@ -6,7 +6,7 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY;
 const CHATWOOT_URL = process.env.CHATWOOT_URL || 'chatwoot-production-5bb4.up.railway.app';
 const CHATWOOT_TOKEN = process.env.CHATWOOT_TOKEN;
 const REDIS_URL = process.env.REDIS_URL;
-const GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQbnna-vcEFstuBQvVLP1bFLEveKMrJ1DAeWzVjHKi_WAJnDvJzg4KTlWWYNOcc8hffAayMBLYgYLoR/pub?gid=0&single=true&output=csv';
+const GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQbnna-vcEFstuBQvVLP1bFLEveKMrJ1DAeWzVjHKi_WAJnDvJzg4KTlWWYNOcc8hffAayMBLYgYLoR/pub?output=csv';
 
 // Simple Redis client
 function redisCommand(command, args) {
