@@ -25,7 +25,10 @@ function fetchRates() {
         }
         resolve(rates);
       });
-    }).on('error', function() { resolve({}); });
+    }).on('error', function(err) { 
+  console.log('Rates fetch error:', err.message); 
+  resolve({}); 
+});
   });
 }
 
