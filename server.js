@@ -32,7 +32,7 @@ function fetchRates() {
 function callClaude(messages, system) {
   return new Promise(function(resolve, reject) {
     var body = JSON.stringify({
-      model: 'claude-haiku-4-5',
+      model: 'claude-sonnet-4-6',
       max_tokens: 500,
       system: system,
       messages: messages
