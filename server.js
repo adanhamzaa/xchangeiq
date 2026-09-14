@@ -108,7 +108,19 @@ async function getRates() {
     return sheetRates;
   }
   console.log('Falling back to DB rates');
-  return await getRatesFromDB();
+  var dbRates = await getRatesFromDB();
+  if (Object.keys(dbRates).length > 0) return dbRates;
+  console.log('Using hardcoded fallback rates');
+  return {
+    USD: { buy: 128.5, sell: 130 },
+    EUR: { buy: 140.2, sell: 142 },
+    GBP: { buy: 162.3, sell: 164.5 },
+    AED: { buy: 35, sell: 36 },
+    CNY: { buy: 17.5, sell: 18.2 },
+    CAD: { buy: 94.5, sell: 96 },
+    AUD: { buy: 83.2, sell: 85 },
+    INR: { buy: 1.52, sell: 1.6 }
+  };
 }
 
 function callClaude(messages, system) {
@@ -274,10 +286,16 @@ var server = http.createServer(function(req, res) {
         try {
           aiData = JSON.parse(clean);
         } catch(e) {
-          aiData = { reply: clean.length > 10 && clean.length < 800 ? clean : "How can I help you today?", is_vip: false };
+          // Claude returned plain text - use it directly
+          aiData = { reply: "How can I help you today?", is_vip: false };
         }
 
-        var reply = aiData.reply || "How can I help you?";
+        // CRITICAL: only use the reply field, never send raw JSON
+        var reply = String(aiData.reply || "How can I help you?").replace(/\n/g, "
+");
+        if (reply.startsWith("{") || reply.includes("intent")) {
+          reply = "How can I help you today?";
+        }
         var isVip = (calculation && calculation.isVip) || aiData.is_vip || false;
 
         // Save history to PostgreSQL
