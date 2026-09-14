@@ -291,8 +291,7 @@ var server = http.createServer(function(req, res) {
         }
 
         // CRITICAL: only use the reply field, never send raw JSON
-        var reply = String(aiData.reply || "How can I help you?").replace(/\n/g, "
-");
+        var reply = String(aiData.reply || "How can I help you?");
         if (reply.startsWith("{") || reply.includes("intent")) {
           reply = "How can I help you today?";
         }
