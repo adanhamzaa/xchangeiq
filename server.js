@@ -98,7 +98,7 @@ function getOpeningTime() {
   var day = nairobi.getDay();
   var nextDay = new Date(nairobi);
   nextDay.setDate(nextDay.getDate() + 1);
-  var nextDayName = nextDay.toLocaleDateString('en-KE', { weekday: 'long', timeZone: 'Africa/Nairobi' });
+  var nextDayName = nextDay.toLocaleDateString('en-KE', { weekday: 'long' });
   
   if (day === 6) { // Saturday - next is Sunday
     return 'tomorrow Sunday at 8:00 AM (closing 3:00 PM)';
