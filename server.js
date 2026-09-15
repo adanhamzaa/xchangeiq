@@ -75,17 +75,14 @@ async function setupDB() {
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `);
-    // Seed rates if empty
-    var existing = await queryDB('SELECT COUNT(*) as count FROM rates');
-    if (parseInt(existing.rows[0].count) === 0) {
-      for (var cur in FALLBACK_RATES) {
-        await queryDB(
-          'INSERT INTO rates (currency, buy_rate, sell_rate) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-          [cur, FALLBACK_RATES[cur].buy, FALLBACK_RATES[cur].sell]
-        );
-      }
-      console.log('Seeded default rates');
+    // Always update rates on startup
+    for (var cur in FALLBACK_RATES) {
+      await queryDB(
+        'INSERT INTO rates (currency, buy_rate, sell_rate) VALUES ($1, $2, $3) ON CONFLICT (currency) DO UPDATE SET buy_rate=$2, sell_rate=$3, updated_at=NOW()',
+        [cur, FALLBACK_RATES[cur].buy, FALLBACK_RATES[cur].sell]
+      );
     }
+    console.log('Rates updated on startup');
     console.log('Database ready!');
   } catch(e) {
     console.log('DB setup error:', e.message);
