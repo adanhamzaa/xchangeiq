@@ -40,6 +40,41 @@ const BUSINESS_INFO = {
   phone: '+254787510515'
 };
 
+// Google Sheet URL for rates sync
+const GOOGLE_SHEET_URL = process.env.GOOGLE_SHEET_URL || '';
+
+// Fetch rates from Google Sheet
+function fetchRatesFromSheet() {
+  return new Promise(function(resolve) {
+    if (!GOOGLE_SHEET_URL) return resolve({});
+    https.get(GOOGLE_SHEET_URL, function(res) {
+      var data = '';
+      res.on('data', function(chunk) { data += chunk; });
+      res.on('end', function() {
+        var rates = {};
+        var lines = data.trim().split('\n');
+        for (var i = 1; i < lines.length; i++) {
+          var cols = lines[i].split(/[\t,]/);
+          if (cols[2] && cols[2].trim()) {
+            var cur = cols[2].trim().toUpperCase();
+            var buy = parseFloat(cols[3]) || 0;
+            var sell = parseFloat(cols[4]) || 0;
+            if (buy > 0) rates[cur] = { buy: buy, sell: sell };
+          }
+        }
+        console.log('Sheet rates fetched:', Object.keys(rates).join(','));
+        resolve(rates);
+      });
+    }).on('error', function(err) {
+      console.log('Sheet fetch error:', err.message);
+      resolve({});
+    });
+  });
+}
+
+// Admin phone numbers allowed to update rates via WhatsApp
+const ADMIN_PHONES = (process.env.ADMIN_PHONES || '').split(',').filter(Boolean);
+
 // Simple DB pool
 async function queryDB(sql, params) {
   var client = new Client({
@@ -301,6 +336,35 @@ var server = http.createServer(function(req, res) {
           console.log('Conversation assigned to human agent - bot staying silent');
           return;
         }
+
+        // ADMIN COMMAND: Check if message is from admin and is a rate update command
+        var senderPhone = String((payload.sender && payload.sender.phone_number) || '').replace(/\s/g, '');
+        var isAdmin = ADMIN_PHONES.length === 0 || ADMIN_PHONES.some(function(p) { return senderPhone.includes(p.trim()); });
+        
+        if (isAdmin && currentMessage.toUpperCase().startsWith('RATES ')) {
+          // Format: RATES USD 131 132 or RATES USD BUY 131 SELL 132
+          var parts = currentMessage.toUpperCase().split(' ');
+          if (parts.length >= 4) {
+            var updateCur = parts[1];
+            var buyRate = parseFloat(parts[2]);
+            var sellRate = parseFloat(parts[3]);
+            if (updateCur && buyRate > 0 && sellRate > 0) {
+              try {
+                await queryDB(
+                  'INSERT INTO rates (currency, buy_rate, sell_rate, updated_at) VALUES ($1, $2, $3, NOW()) ON CONFLICT (currency) DO UPDATE SET buy_rate=$2, sell_rate=$3, updated_at=NOW()',
+                  [updateCur, buyRate, sellRate]
+                );
+                await sendChatwootMessage(conversationId, '✅ Rates updated! ' + updateCur + ' Buy: ' + buyRate + ' Sell: ' + sellRate, false);
+                console.log('Admin updated rates:', updateCur, buyRate, sellRate);
+              } catch(e) {
+                await sendChatwootMessage(conversationId, '❌ Rate update failed: ' + e.message, false);
+              }
+              return;
+            }
+          }
+          await sendChatwootMessage(conversationId, '❌ Format: RATES USD 131 132', false);
+          return;
+        }
         console.log('MSG from', senderName + ':', currentMessage);
 
         // Load rates and history in parallel
@@ -419,4 +483,25 @@ server.listen(PORT, async function() {
   console.log('AfriDesk API starting on port ' + PORT);
   await setupDB();
   console.log('AfriDesk Ready!');
+
+  // Sync rates from Google Sheet every 5 minutes
+  if (GOOGLE_SHEET_URL) {
+    setInterval(async function() {
+      try {
+        var sheetRates = await fetchRatesFromSheet();
+        if (Object.keys(sheetRates).length > 0) {
+          for (var cur in sheetRates) {
+            await queryDB(
+              'INSERT INTO rates (currency, buy_rate, sell_rate, updated_at) VALUES ($1, $2, $3, NOW()) ON CONFLICT (currency) DO UPDATE SET buy_rate=$2, sell_rate=$3, updated_at=NOW()',
+              [cur, sheetRates[cur].buy, sheetRates[cur].sell]
+            );
+          }
+          console.log('Rates synced from Google Sheet at', new Date().toLocaleString('en-KE', {timeZone: 'Africa/Nairobi'}));
+        }
+      } catch(e) {
+        console.log('Rate sync error:', e.message);
+      }
+    }, 5 * 60 * 1000);
+    console.log('Rate sync scheduled every 5 minutes!');
+  }
 });
