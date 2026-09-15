@@ -9,14 +9,35 @@ const DATABASE_URL = process.env.DATABASE_URL;
 
 // Hardcoded fallback rates - always available
 const FALLBACK_RATES = {
-  USD: { buy: 128.5, sell: 130 },
-  EUR: { buy: 140.2, sell: 142 },
-  GBP: { buy: 162.3, sell: 164.5 },
-  AED: { buy: 35, sell: 36 },
-  CNY: { buy: 17.5, sell: 18.2 },
-  CAD: { buy: 94.5, sell: 96 },
-  AUD: { buy: 83.2, sell: 85 },
-  INR: { buy: 1.52, sell: 1.6 }
+  USD: { buy: 129.0, sell: 130.0 },
+  EUR: { buy: 148.0, sell: 151.0 },
+  GBP: { buy: 173.5, sell: 177.0 },
+  CAD: { buy: 91.0, sell: 95.0 },
+  CHF: { buy: 156.0, sell: 163.0 },
+  AUD: { buy: 90.0, sell: 95.0 },
+  AED: { buy: 33.0, sell: 37.0 },
+  CNY: { buy: 17.0, sell: 22.0 },
+  ZAR: { buy: 7.0, sell: 10.0 },
+  SAR: { buy: 31.0, sell: 35.0 },
+  JPY: { buy: 0.7, sell: 1.0 },
+  NOK: { buy: 9.0, sell: 15.0 },
+  DKK: { buy: 14.0, sell: 20.0 },
+  SEK: { buy: 9.0, sell: 12.0 },
+  UGX: { buy: 0.03, sell: 0.05 },
+  TZS: { buy: 0.04, sell: 0.06 },
+  INR: { buy: 1.1, sell: 2.5 },
+  QAR: { buy: 31.0, sell: 34.0 }
+};
+
+// Business information
+const BUSINESS_INFO = {
+  name: 'AfriDesk Forex Bureau',
+  hours: 'Monday to Saturday: 8:00 AM - 5:00 PM | Sunday: 8:00 AM - 3:00 PM',
+  branches: [
+    'Branch 1: Standard Street, CBD Nairobi',
+    'Branch 2: Wabera Street, CBD Nairobi'
+  ],
+  phone: '+254787510515'
 };
 
 // Simple DB pool
@@ -116,14 +137,24 @@ function detectIntent(message) {
   var result = { currency: null, amount: null, direction: null };
 
   var currencyMap = {
-    'USD': ['usd', 'dollar', 'dollars', 'dola', 'doola', 'american'],
+    'USD': ['usd', 'dollar', 'dollars', 'dola', 'doola', 'american', 'us dollar'],
     'EUR': ['eur', 'euro', 'euros'],
-    'GBP': ['gbp', 'pound', 'pounds', 'sterling', 'uk money'],
+    'GBP': ['gbp', 'pound', 'pounds', 'sterling', 'uk money', 'british'],
     'AED': ['aed', 'dirham', 'dirhams', 'uae'],
     'CNY': ['cny', 'yuan', 'rmb', 'china money', 'chinese', 'pesa ya china', 'lacagta china'],
-    'CAD': ['cad', 'canadian dollar'],
-    'AUD': ['aud', 'australian dollar'],
-    'INR': ['inr', 'rupee', 'rupees', 'indian']
+    'CAD': ['cad', 'canadian', 'canada dollar'],
+    'AUD': ['aud', 'australian', 'australia dollar'],
+    'INR': ['inr', 'rupee', 'rupees', 'indian'],
+    'CHF': ['chf', 'swiss', 'switzerland', 'franc', 'francs'],
+    'ZAR': ['zar', 'rand', 'south africa', 'south african'],
+    'SAR': ['sar', 'riyal', 'riyals', 'saudi', 'saudi arabia'],
+    'JPY': ['jpy', 'yen', 'japan', 'japanese'],
+    'NOK': ['nok', 'norway', 'norwegian', 'krone', 'kroner'],
+    'DKK': ['dkk', 'denmark', 'danish'],
+    'SEK': ['sek', 'sweden', 'swedish', 'kronor'],
+    'UGX': ['ugx', 'uganda', 'ugandan', 'shilling'],
+    'TZS': ['tzs', 'tanzania', 'tanzanian'],
+    'QAR': ['qar', 'qatar', 'qatari']
   };
 
   for (var cur in currencyMap) {
@@ -325,7 +356,7 @@ var server = http.createServer(function(req, res) {
 
         claudeMessages.push({ role: 'user', content: userContent });
 
-        var system = 'You are Hassan, a warm witty and persuasive forex assistant at AfriDesk East Africa.\n\nCORE RULES:\n1. Always respond with ONLY valid JSON - nothing else\n2. Use customer name naturally\n3. Reply in same language as customer (English/Swahili/Sheng/Somali)\n4. Use conversation history - never ask for info already given\n5. NEVER calculate rates yourself - use CALCULATION RESULT if provided\n6. Share CALCULATION RESULT numbers naturally\n\nRATE DIRECTION RULES:\n7. Customer SELLING foreign currency (has USD/EUR/CNY wants KES) = they get BUY rate\n8. Customer BUYING foreign currency (wants USD/EUR/CNY pays KES) = they pay SELL rate\n9. NEVER agree to a rate the customer requests. If customer asks can I get 130 for USD reply: Our current buy rate is 128.5 - our senior dealer will confirm the best possible rate for your amount\n10. Never promise to match competitor rates - always escalate to dealer\n\nSALES RULES:\n11. When customer mentions competitor rate - acknowledge then create urgency and escalate\n12. Create urgency naturally - rates change every hour\n13. Offer to connect customer with senior dealer for better rate\n14. Be trusted advisor not pushy salesman\n\nBARGAINING RULES:\n15. If customer insists on better rate or bargains - set is_bargain to true\n16. Tell customer senior dealer will contact them personally\n17. Always make customer feel valued and important\n\nVIP RULES:\n18. VIP: true means senior teller will contact for preferential rate\n19. Large amounts always deserve personal attention\n\nJSON FORMAT:\n{"intent":"greeting|rates|exchange|smalltalk|bargain|other","direction":"buy|sell|null","currency":"USD|EUR|GBP|AED|CNY|CAD|AUD|INR|null","amount":null,"is_vip":false,"is_bargain":false,"reply":"your natural response"}';
+        var system = 'You are Hassan, a warm witty and persuasive forex assistant at AfriDesk Forex Bureau, Nairobi Kenya. BUSINESS INFO: Hours: Monday-Saturday 8AM-5PM, Sunday 8AM-3PM. Branches: Standard Street CBD and Wabera Street CBD. Phone: +254787510515.\n\nCORE RULES:\n1. Always respond with ONLY valid JSON - nothing else\n2. Use customer name naturally\n3. Reply in same language as customer (English/Swahili/Sheng/Somali)\n4. Use conversation history - never ask for info already given\n5. NEVER calculate rates yourself - use CALCULATION RESULT if provided\n6. Share CALCULATION RESULT numbers naturally\n\nRATE DIRECTION RULES:\n7. Customer SELLING foreign currency (has USD/EUR/CNY wants KES) = they get BUY rate\n8. Customer BUYING foreign currency (wants USD/EUR/CNY pays KES) = they pay SELL rate\n9. NEVER agree to a rate the customer requests. If customer asks can I get 130 for USD reply: Our current buy rate is 128.5 - our senior dealer will confirm the best possible rate for your amount\n10. Never promise to match competitor rates - always escalate to dealer\n\nSALES RULES:\n11. When customer mentions competitor rate - acknowledge then create urgency and escalate\n12. Create urgency naturally - rates change every hour\n13. Offer to connect customer with senior dealer for better rate\n14. Be trusted advisor not pushy salesman\n\nBARGAINING RULES:\n15. If customer insists on better rate or bargains - set is_bargain to true\n16. Tell customer senior dealer will contact them personally\n17. Always make customer feel valued and important\n\nVIP RULES:\n18. VIP: true means senior teller will contact for preferential rate\n19. Large amounts always deserve personal attention\n\nJSON FORMAT:\n{"intent":"greeting|rates|exchange|smalltalk|bargain|other","direction":"buy|sell|null","currency":"USD|EUR|GBP|AED|CNY|CAD|AUD|INR|null","amount":null,"is_vip":false,"is_bargain":false,"reply":"your natural response"}';
 
 
         var claudeRaw = await callClaude(claudeMessages, system);
