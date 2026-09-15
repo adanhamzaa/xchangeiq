@@ -316,7 +316,7 @@ var server = http.createServer(function(req, res) {
         // Build Claude messages
         var claudeMessages = history.slice(-10);
         var userContent = 'Customer name: ' + senderName + '\n';
-        userContent += 'Today: ' + new Date().toDateString() + '\n';
+        userContent += 'Today: ' + new Date().toLocaleString('en-KE', {timeZone: 'Africa/Nairobi'}) + ' Nairobi time\n';
         userContent += 'Live rates: ' + ratesSummary + '\n';
         if (calculation) {
           userContent += 'CALCULATION RESULT: Customer wants to ' + calculation.direction + ' ' + calculation.amount.toLocaleString() + ' ' + calculation.currency + '. Rate: ' + calculation.rate + ' KES. Total: KSh ' + calculation.kes.toLocaleString() + '. VIP: ' + calculation.isVip + '\n';
