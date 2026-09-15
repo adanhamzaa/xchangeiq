@@ -296,6 +296,14 @@ var server = http.createServer(function(req, res) {
         var customerId = String((payload.sender && payload.sender.id) || conversationId);
 
         if (!currentMessage || !conversationId) return;
+
+        // HUMAN HANDOFF: If conversation is assigned to a human agent - bot stays silent
+        var conversationStatus = payload.conversation && payload.conversation.status;
+        var assigneeId = payload.conversation && payload.conversation.meta && payload.conversation.meta.assignee;
+        if (assigneeId) {
+          console.log('Conversation assigned to human agent - bot staying silent');
+          return;
+        }
         console.log('MSG from', senderName + ':', currentMessage);
 
         // Load rates and history in parallel
