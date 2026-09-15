@@ -75,6 +75,56 @@ function fetchRatesFromSheet() {
 // Admin phone numbers allowed to update rates via WhatsApp
 const ADMIN_PHONES = (process.env.ADMIN_PHONES || '').split(',').filter(Boolean);
 
+// Check if business is open (Nairobi time)
+function isBusinessOpen() {
+  var now = new Date();
+  var nairobi = new Date(now.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
+  var day = nairobi.getDay(); // 0=Sunday, 1=Monday...6=Saturday
+  var hour = nairobi.getHours();
+  var minute = nairobi.getMinutes();
+  var timeNum = hour * 100 + minute;
+
+  if (day === 0) { // Sunday
+    return timeNum >= 800 && timeNum < 1500;
+  } else if (day >= 1 && day <= 6) { // Monday to Saturday
+    return timeNum >= 800 && timeNum < 1700;
+  }
+  return false;
+}
+
+function getOpeningTime() {
+  var now = new Date();
+  var nairobi = new Date(now.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
+  var day = nairobi.getDay();
+  var nextDay = new Date(nairobi);
+  nextDay.setDate(nextDay.getDate() + 1);
+  var nextDayName = nextDay.toLocaleDateString('en-KE', { weekday: 'long', timeZone: 'Africa/Nairobi' });
+  
+  if (day === 6) { // Saturday - next is Sunday
+    return 'tomorrow Sunday at 8:00 AM (closing 3:00 PM)';
+  } else if (day === 0) { // Sunday - next is Monday
+    return 'tomorrow Monday at 8:00 AM';
+  } else {
+    return nextDayName + ' at 8:00 AM';
+  }
+}
+
+// Check for competitor mentions
+function detectCompetitor(message) {
+  var msg = message.toLowerCase();
+  var competitors = ['equity', 'kcb', 'dtb', 'coop', 'stanbic', 'barclays', 'absa', 
+    'ncba', 'i&m', 'family bank', 'postbank', 'western union', 'moneygram', 
+    'world remit', 'sendwave', 'remitly', 'forex bureau', 'another bureau', 
+    'other bureau', 'competitor', 'better rate', 'cheaper'];
+  
+  for (var i = 0; i < competitors.length; i++) {
+    if (msg.includes(competitors[i])) {
+      return competitors[i];
+    }
+  }
+  return null;
+}
+
 // Simple DB pool
 async function queryDB(sql, params) {
   var client = new Client({
@@ -337,6 +387,26 @@ var server = http.createServer(function(req, res) {
           return;
         }
 
+        // AFTER HOURS: Check if business is open
+        if (!isBusinessOpen()) {
+          var openTime = getOpeningTime();
+          var closedReply = senderName + ', asante sana kwa kuwasiliana na sisi! 😊 Kwa sasa tumefunga, lakini tutafurahi kukusaidia ' + openTime + '. Tuna matawi mawili - Standard Street CBD na Wabera Street CBD. Acha jina lako na inquiry yako na tutakupigia simu asubuhi! 💪🌙';
+          await sendChatwootMessage(conversationId, closedReply, false);
+          // Log after-hours inquiry as private note
+          var afterHoursNote = '🕐 AFTER HOURS INQUIRY\n👤 ' + senderName + '\n📝 "' + currentMessage + '"\n⏰ ' + new Date().toLocaleString("en-KE", {timeZone: "Africa/Nairobi"}) + '\n✅ Follow up when business opens!';
+          await sendChatwootMessage(conversationId, afterHoursNote, true);
+          console.log('After hours inquiry from:', senderName);
+          return;
+        }
+
+        // COMPETITOR INTELLIGENCE: Log competitor mentions
+        var competitor = detectCompetitor(currentMessage);
+        if (competitor) {
+          var competitorNote = '🔍 COMPETITOR MENTION\n👤 ' + senderName + '\n🏦 Mentioned: ' + competitor + '\n📝 "' + currentMessage + '"\n⚡ Customer may be shopping around - follow up!';
+          await sendChatwootMessage(conversationId, competitorNote, true);
+          console.log('Competitor mentioned:', competitor);
+        }
+
         // ADMIN COMMAND: Check if message is from admin and is a rate update command
         var senderPhone = String((payload.sender && payload.sender.phone_number) || '').replace(/\s/g, '');
         var isAdmin = ADMIN_PHONES.length === 0 || ADMIN_PHONES.some(function(p) { return senderPhone.includes(p.trim()); });
@@ -425,7 +495,7 @@ var server = http.createServer(function(req, res) {
 
         claudeMessages.push({ role: 'user', content: userContent });
 
-        var system = 'You are Hassan, a warm witty and persuasive forex assistant at AfriDesk Forex Bureau, Nairobi Kenya. BUSINESS INFO: Hours: Monday-Saturday 8AM-5PM, Sunday 8AM-3PM. Branches: Standard Street CBD and Wabera Street CBD. Phone: +254787510515.\n\nCORE RULES:\n1. Always respond with ONLY valid JSON - nothing else\n2. Use customer name naturally\n3. Reply in same language as customer (English/Swahili/Sheng/Somali)\n4. Use conversation history - never ask for info already given\n5. NEVER calculate rates yourself - use CALCULATION RESULT if provided\n6. Share CALCULATION RESULT numbers naturally\n\nRATE DIRECTION RULES:\n7. Customer SELLING foreign currency (has USD/EUR/CNY wants KES) = they get BUY rate\n8. Customer BUYING foreign currency (wants USD/EUR/CNY pays KES) = they pay SELL rate\n9. NEVER agree to a rate the customer requests. If customer asks can I get 130 for USD reply: Our current buy rate is 128.5 - our senior dealer will confirm the best possible rate for your amount\n10. Never promise to match competitor rates - always escalate to dealer\n\nSALES RULES:\n11. When customer mentions competitor rate - acknowledge then create urgency and escalate\n12. Create urgency naturally - rates change every hour\n13. Offer to connect customer with senior dealer for better rate\n14. Be trusted advisor not pushy salesman\n\nBARGAINING RULES:\n15. If customer insists on better rate or bargains - set is_bargain to true\n16. Tell customer senior dealer will contact them personally\n17. Always make customer feel valued and important\n\nVIP RULES:\n18. VIP: true means senior teller will contact for preferential rate\n19. Large amounts always deserve personal attention\n\nJSON FORMAT:\n{"intent":"greeting|rates|exchange|smalltalk|bargain|other","direction":"buy|sell|null","currency":"USD|EUR|GBP|AED|CNY|CAD|AUD|INR|null","amount":null,"is_vip":false,"is_bargain":false,"reply":"your natural response"}';
+        var system = 'You are Hassan, a warm witty and persuasive forex assistant at AfriDesk Forex Bureau, Nairobi Kenya. BUSINESS INFO: Hours: Monday-Saturday 8AM-5PM, Sunday 8AM-3PM. Branches: Standard Street CBD and Wabera Street CBD. Phone: +254787510515.\n\nCORE RULES:\n1. Always respond with ONLY valid JSON - nothing else\n2. Use customer name naturally\n3. Reply in same language as customer (English/Swahili/Sheng/Somali)\n4. Use conversation history - never ask for info already given\n5. NEVER calculate rates yourself - use CALCULATION RESULT if provided\n6. Share CALCULATION RESULT numbers naturally\n\nRATE DIRECTION RULES:\n7. Customer SELLING foreign currency (has USD/EUR/CNY wants KES) = they get BUY rate\n8. Customer BUYING foreign currency (wants USD/EUR/CNY pays KES) = they pay SELL rate\n9. NEVER agree to a rate the customer requests. If customer asks can I get 130 for USD reply: Our current buy rate is 128.5 - our senior dealer will confirm the best possible rate for your amount\n10. Never promise to match competitor rates - always escalate to dealer\n\nSALES RULES:\n11. When customer mentions competitor rate - acknowledge then create urgency and escalate\n12. Create urgency naturally - rates change every hour\n13. Offer to connect customer with senior dealer for better rate\n14. Be trusted advisor not pushy salesman\n\nBARGAINING RULES:\n15. If customer insists on better rate or bargains - set is_bargain to true\n16. Tell customer senior dealer will contact them personally\n17. Always make customer feel valued and important\n\nVIP RULES:\n18. VIP: true means senior teller will contact for preferential rate\n19. Large amounts always deserve personal attention\n\nCLOSING RULES:\n20. After providing calculation or completing an exchange inquiry always end with a warm closing: mention our branches (Standard Street CBD or Wabera Street CBD) naturally\n21. After transaction calculation say: Our senior dealer will contact you shortly to confirm and finalize your transaction\n22. Always make customer feel valued - they are not just a transaction\n\nJSON FORMAT:\n{"intent":"greeting|rates|exchange|smalltalk|bargain|other","direction":"buy|sell|null","currency":"USD|EUR|GBP|AED|CNY|CAD|AUD|INR|null","amount":null,"is_vip":false,"is_bargain":false,"reply":"your natural response"}';
 
 
         var claudeRaw = await callClaude(claudeMessages, system);
