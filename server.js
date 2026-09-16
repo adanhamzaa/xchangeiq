@@ -123,16 +123,19 @@ function sendSMS(phone, message) {
 
 // Check if business is open (Nairobi time)
 function isBusinessOpen() {
+  // TESTING MODE - always open
+  if (process.env.TESTING_MODE === 'true') return true;
+  
   var now = new Date();
   var nairobi = new Date(now.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
-  var day = nairobi.getDay(); // 0=Sunday, 1=Monday...6=Saturday
+  var day = nairobi.getDay();
   var hour = nairobi.getHours();
   var minute = nairobi.getMinutes();
   var timeNum = hour * 100 + minute;
 
-  if (day === 0) { // Sunday
+  if (day === 0) {
     return timeNum >= 800 && timeNum < 1500;
-  } else if (day >= 1 && day <= 6) { // Monday to Saturday
+  } else if (day >= 1 && day <= 6) {
     return timeNum >= 800 && timeNum < 1700;
   }
   return false;
