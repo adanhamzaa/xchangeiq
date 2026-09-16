@@ -75,6 +75,52 @@ function fetchRatesFromSheet() {
 // Admin phone numbers allowed to update rates via WhatsApp
 const ADMIN_PHONES = (process.env.ADMIN_PHONES || '').split(',').filter(Boolean);
 
+// Africa's Talking SMS
+const AT_API_KEY = process.env.AT_API_KEY;
+const AT_USERNAME = process.env.AT_USERNAME || 'sandbox';
+const TELLER_PHONE = process.env.TELLER_PHONE;
+
+function sendSMS(phone, message) {
+  return new Promise(function(resolve) {
+    if (!AT_API_KEY || !phone) {
+      console.log('SMS not configured - skipping');
+      return resolve(null);
+    }
+
+    var body = 'username=' + encodeURIComponent(AT_USERNAME) +
+      '&to=' + encodeURIComponent(phone) +
+      '&message=' + encodeURIComponent(message);
+
+    var options = {
+      hostname: 'api.sandbox.africastalking.com',
+      path: '/version1/messaging',
+      method: 'POST',
+      headers: {
+        'apiKey': AT_API_KEY,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      }
+    };
+
+    var req = https.request(options, function(res) {
+      var data = '';
+      res.on('data', function(chunk) { data += chunk; });
+      res.on('end', function() {
+        console.log('SMS sent! Response:', data.substring(0, 100));
+        resolve(data);
+      });
+    });
+    req.on('error', function(err) {
+      console.log('SMS error:', err.message);
+      resolve(null);
+    });
+    setTimeout(function() { req.destroy(); resolve(null); }, 10000);
+    req.write(body);
+    req.end();
+  });
+}
+
 // Check if business is open (Nairobi time)
 function isBusinessOpen() {
   var now = new Date();
@@ -525,6 +571,9 @@ var server = http.createServer(function(req, res) {
         if (isVip) {
           var tellerNote = '🚨 VIP ENQUIRY\n👤 Customer: ' + senderName + '\n💱 Currency: ' + (calculation ? calculation.currency : aiData.currency || '?') + '\n💰 Amount: ' + (calculation ? calculation.amount.toLocaleString() : 'Large amount') + '\n📝 "' + currentMessage + '"\n✅ Contact customer for preferential rate NOW!';
           await sendChatwootMessage(conversationId, tellerNote, true);
+          // SMS alert to teller
+          var vipSMS = 'VIP ALERT! Customer: ' + senderName + ' wants to ' + (calculation ? calculation.direction + ' ' + calculation.amount.toLocaleString() + ' ' + calculation.currency : 'large transaction') + '. Contact NOW for preferential rate! - AfriDesk';
+          await sendSMS(TELLER_PHONE, vipSMS);
           console.log('VIP alert sent!');
         }
 
@@ -532,6 +581,9 @@ var server = http.createServer(function(req, res) {
         if (isBargain && !isVip) {
           var bargainNote = '💬 BARGAIN REQUEST\n👤 Customer: ' + senderName + '\n💱 Currency: ' + (calculation ? calculation.currency : aiData.currency || '?') + '\n💰 Amount: ' + (calculation ? calculation.amount.toLocaleString() : 'Unknown') + '\n📝 "' + currentMessage + '"\n⚡ Customer is negotiating — senior dealer should contact ASAP!';
           await sendChatwootMessage(conversationId, bargainNote, true);
+          // SMS alert to teller for bargain
+          var bargainSMS = 'BARGAIN ALERT! Customer: ' + senderName + ' is negotiating rates. Contact ASAP! - AfriDesk';
+          await sendSMS(TELLER_PHONE, bargainSMS);
           console.log('Bargain alert sent!');
         }
 
