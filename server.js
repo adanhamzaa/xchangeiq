@@ -80,6 +80,40 @@ const AT_API_KEY = process.env.AT_API_KEY;
 const AT_USERNAME = process.env.AT_USERNAME || 'sandbox';
 const TELLER_PHONE = process.env.TELLER_PHONE;
 const TELLER_WHATSAPP = process.env.TELLER_WHATSAPP || process.env.TELLER_PHONE;
+const TELLER_AGENT_ID = process.env.TELLER_AGENT_ID || '2';
+
+function assignConversationToTeller(conversationId) {
+  return new Promise(function(resolve) {
+    if (!CHATWOOT_TOKEN || !conversationId) return resolve(null);
+    
+    var body = JSON.stringify({ assignee_id: parseInt(TELLER_AGENT_ID) });
+    var options = {
+      hostname: CHATWOOT_URL,
+      path: '/api/v1/accounts/1/conversations/' + conversationId + '/assignments',
+      method: 'POST',
+      headers: {
+        'api_access_token': CHATWOOT_TOKEN,
+        'Content-Type': 'application/json',
+        'content-length': Buffer.byteLength(body)
+      }
+    };
+    
+    var req = https.request(options, function(res) {
+      var data = '';
+      res.on('data', function(c) { data += c; });
+      res.on('end', function() {
+        console.log('Conversation assigned to teller! ID:', conversationId);
+        resolve(true);
+      });
+    });
+    req.on('error', function(e) {
+      console.log('Assignment error:', e.message);
+      resolve(null);
+    });
+    req.write(body);
+    req.end();
+  });
+}
 
 function sendWhatsAppToTeller(phone, message) {
   return new Promise(function(resolve) {
@@ -686,6 +720,8 @@ var server = http.createServer(function(req, res) {
         if (isVip) {
           var tellerNote = '🚨 VIP ENQUIRY\n👤 Customer: ' + senderName + '\n💱 Currency: ' + (calculation ? calculation.currency : aiData.currency || '?') + '\n💰 Amount: ' + (calculation ? calculation.amount.toLocaleString() : 'Large amount') + '\n📝 "' + currentMessage + '"\n✅ Contact customer for preferential rate NOW!';
           await sendChatwootMessage(conversationId, tellerNote, true);
+          // Assign conversation to teller - triggers Chatwoot push notification
+          await assignConversationToTeller(conversationId);
           // SMS alert to teller
           var vipSMS = 'VIP ALERT! Customer: ' + senderName + ' wants to ' + (calculation ? calculation.direction + ' ' + calculation.amount.toLocaleString() + ' ' + calculation.currency : 'large transaction') + '. Contact NOW for preferential rate! - AfriDesk';
           await sendSMS(TELLER_PHONE, vipSMS);
@@ -697,6 +733,8 @@ var server = http.createServer(function(req, res) {
         if (isBargain && !isVip) {
           var bargainNote = '💬 BARGAIN REQUEST\n👤 Customer: ' + senderName + '\n💱 Currency: ' + (calculation ? calculation.currency : aiData.currency || '?') + '\n💰 Amount: ' + (calculation ? calculation.amount.toLocaleString() : 'Unknown') + '\n📝 "' + currentMessage + '"\n⚡ Customer is negotiating — senior dealer should contact ASAP!';
           await sendChatwootMessage(conversationId, bargainNote, true);
+          // Assign conversation to teller
+          await assignConversationToTeller(conversationId);
           // SMS alert to teller for bargain
           var bargainSMS = 'BARGAIN ALERT! Customer: ' + senderName + ' is negotiating rates. Contact ASAP! - AfriDesk';
           await sendSMS(TELLER_PHONE, bargainSMS);
