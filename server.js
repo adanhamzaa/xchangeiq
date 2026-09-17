@@ -79,6 +79,7 @@ const ADMIN_PHONES = (process.env.ADMIN_PHONES || '').split(',').filter(Boolean)
 const AT_API_KEY = process.env.AT_API_KEY;
 const AT_USERNAME = process.env.AT_USERNAME || 'sandbox';
 const TELLER_PHONE = process.env.TELLER_PHONE;
+const MOBILESASA_TOKEN = process.env.MOBILESASA_TOKEN;
 const TELLER_WHATSAPP = process.env.TELLER_WHATSAPP || process.env.TELLER_PHONE;
 const TELLER_AGENT_ID = process.env.TELLER_AGENT_ID || '2';
 
@@ -278,42 +279,83 @@ function sendWhatsAppToTeller(phone, message) {
 
 function sendSMS(phone, message) {
   return new Promise(function(resolve) {
-    if (!AT_API_KEY || !phone) {
+    if (!phone) {
       console.log('SMS not configured - skipping');
       return resolve(null);
     }
 
-    var body = 'username=' + encodeURIComponent(AT_USERNAME) +
-      '&to=' + encodeURIComponent(phone) +
-      '&message=' + encodeURIComponent(message);
-
-    var options = {
-      hostname: process.env.AT_USERNAME === 'sandbox' ? 'api.sandbox.africastalking.com' : 'api.africastalking.com',
-      path: '/version1/messaging',
-      method: 'POST',
-      headers: {
-        'apiKey': AT_API_KEY,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json',
-        'Content-Length': Buffer.byteLength(body)
-      }
-    };
-
-    var req = https.request(options, function(res) {
-      var data = '';
-      res.on('data', function(chunk) { data += chunk; });
-      res.on('end', function() {
-        console.log('SMS sent! Response:', data.substring(0, 100));
-        resolve(data);
+    // Use Mobile Sasa if token available, otherwise Africa's Talking
+    if (MOBILESASA_TOKEN) {
+      var body = JSON.stringify({
+        token: MOBILESASA_TOKEN,
+        sender_id: 'MOBILESASA',
+        message: message,
+        phone: phone.replace('+', '')
       });
-    });
-    req.on('error', function(err) {
-      console.log('SMS error:', err.message);
+
+      var options = {
+        hostname: 'api.mobilesasa.com',
+        path: '/v1/send/message',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Content-Length': Buffer.byteLength(body)
+        }
+      };
+
+      var req = https.request(options, function(res) {
+        var data = '';
+        res.on('data', function(chunk) { data += chunk; });
+        res.on('end', function() {
+          console.log('Mobile Sasa SMS sent! Response:', data.substring(0, 100));
+          resolve(data);
+        });
+      });
+      req.on('error', function(err) {
+        console.log('Mobile Sasa SMS error:', err.message);
+        resolve(null);
+      });
+      setTimeout(function() { req.destroy(); resolve(null); }, 10000);
+      req.write(body);
+      req.end();
+
+    } else if (AT_API_KEY) {
+      var atBody = 'username=' + encodeURIComponent(AT_USERNAME) +
+        '&to=' + encodeURIComponent(phone) +
+        '&message=' + encodeURIComponent(message);
+
+      var atOptions = {
+        hostname: AT_USERNAME === 'sandbox' ? 'api.sandbox.africastalking.com' : 'api.africastalking.com',
+        path: '/version1/messaging',
+        method: 'POST',
+        headers: {
+          'apiKey': AT_API_KEY,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json',
+          'Content-Length': Buffer.byteLength(atBody)
+        }
+      };
+
+      var atReq = https.request(atOptions, function(res) {
+        var data = '';
+        res.on('data', function(chunk) { data += chunk; });
+        res.on('end', function() {
+          console.log('AT SMS sent! Response:', data.substring(0, 100));
+          resolve(data);
+        });
+      });
+      atReq.on('error', function(err) {
+        console.log('AT SMS error:', err.message);
+        resolve(null);
+      });
+      setTimeout(function() { atReq.destroy(); resolve(null); }, 10000);
+      atReq.write(atBody);
+      atReq.end();
+    } else {
+      console.log('No SMS provider configured');
       resolve(null);
-    });
-    setTimeout(function() { req.destroy(); resolve(null); }, 10000);
-    req.write(body);
-    req.end();
+    }
   });
 }
 
