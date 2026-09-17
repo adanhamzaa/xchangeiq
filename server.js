@@ -92,7 +92,7 @@ function sendSMS(phone, message) {
       '&message=' + encodeURIComponent(message);
 
     var options = {
-      hostname: 'api.sandbox.africastalking.com',
+      hostname: process.env.AT_USERNAME === 'sandbox' ? 'api.sandbox.africastalking.com' : 'api.africastalking.com',
       path: '/version1/messaging',
       method: 'POST',
       headers: {
