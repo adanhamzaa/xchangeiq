@@ -84,67 +84,111 @@ const TELLER_WHATSAPP = process.env.TELLER_WHATSAPP || process.env.TELLER_PHONE;
 function sendWhatsAppToTeller(phone, message) {
   return new Promise(function(resolve) {
     if (!CHATWOOT_TOKEN || !phone) return resolve(null);
+
+    // Step 1: Search for contact by phone
+    var cleanPhone = phone.replace(/\s/g, '');
+    var searchPath = '/api/v1/accounts/1/contacts/search?q=' + encodeURIComponent(cleanPhone) + '&include_contacts=true';
     
-    // Create or find contact and send message via Chatwoot API
-    var searchBody = JSON.stringify({ q: phone });
     var searchOptions = {
       hostname: CHATWOOT_URL,
-      path: '/api/v1/accounts/1/contacts/search?q=' + encodeURIComponent(phone) + '&include_contacts=true',
+      path: searchPath,
       method: 'GET',
-      headers: {
-        'api_access_token': CHATWOOT_TOKEN,
-        'Content-Type': 'application/json'
-      }
+      headers: { 'api_access_token': CHATWOOT_TOKEN }
     };
 
-    var req = https.request(searchOptions, function(res) {
+    https.request(searchOptions, function(res) {
       var data = '';
-      res.on('data', function(chunk) { data += chunk; });
+      res.on('data', function(c) { data += c; });
       res.on('end', function() {
         try {
           var result = JSON.parse(data);
-          var contactId = result.payload && result.payload[0] && result.payload[0].id;
-          if (contactId) {
-            // Send new conversation to teller
-            var convBody = JSON.stringify({
-              inbox_id: 1,
-              contact_id: contactId,
-              additional_attributes: {},
-              message: { content: message }
-            });
-            var convOptions = {
-              hostname: CHATWOOT_URL,
-              path: '/api/v1/accounts/1/conversations',
-              method: 'POST',
-              headers: {
-                'api_access_token': CHATWOOT_TOKEN,
-                'Content-Type': 'application/json',
-                'content-length': Buffer.byteLength(convBody)
-              }
-            };
-            var convReq = https.request(convOptions, function(r) {
-              var d = '';
-              r.on('data', function(c) { d += c; });
-              r.on('end', function() {
-                console.log('WhatsApp teller alert sent!');
-                resolve(d);
-              });
-            });
-            convReq.on('error', resolve);
-            convReq.write(convBody);
-            convReq.end();
-          } else {
-            console.log('Teller contact not found in Chatwoot');
-            resolve(null);
+          var contacts = result.payload || [];
+          var contact = contacts.find(function(c) {
+            return c.phone_number && c.phone_number.replace(/\s/g, '').includes(cleanPhone.replace('+', ''));
+          });
+          
+          if (!contact) {
+            console.log('Teller contact not found:', cleanPhone);
+            return resolve(null);
           }
+
+          // Step 2: Find open conversation with this contact
+          var convSearchPath = '/api/v1/accounts/1/contacts/' + contact.id + '/conversations';
+          https.request({
+            hostname: CHATWOOT_URL,
+            path: convSearchPath,
+            method: 'GET',
+            headers: { 'api_access_token': CHATWOOT_TOKEN }
+          }, function(r) {
+            var d = '';
+            r.on('data', function(c) { d += c; });
+            r.on('end', function() {
+              try {
+                var convResult = JSON.parse(d);
+                var conversations = (convResult.data && convResult.data.payload) || convResult.payload || [];
+                var openConv = conversations.find(function(c) { return c.status === 'open'; });
+                
+                if (openConv) {
+                  // Send message to existing open conversation
+                  var msgBody = JSON.stringify({
+                    content: message,
+                    message_type: 'outgoing',
+                    private: false
+                  });
+                  https.request({
+                    hostname: CHATWOOT_URL,
+                    path: '/api/v1/accounts/1/conversations/' + openConv.id + '/messages',
+                    method: 'POST',
+                    headers: {
+                      'api_access_token': CHATWOOT_TOKEN,
+                      'Content-Type': 'application/json',
+                      'content-length': Buffer.byteLength(msgBody)
+                    }
+                  }, function(mr) {
+                    mr.on('data', function() {});
+                    mr.on('end', function() {
+                      console.log('WhatsApp teller alert sent to conversation', openConv.id);
+                      resolve(true);
+                    });
+                  }).on('error', resolve).end(msgBody);
+                } else {
+                  console.log('No open conversation with teller - creating new one');
+                  // Create new conversation
+                  var newConvBody = JSON.stringify({
+                    inbox_id: 1,
+                    contact_id: contact.id,
+                    additional_attributes: {},
+                    message: { content: message }
+                  });
+                  https.request({
+                    hostname: CHATWOOT_URL,
+                    path: '/api/v1/accounts/1/conversations',
+                    method: 'POST',
+                    headers: {
+                      'api_access_token': CHATWOOT_TOKEN,
+                      'Content-Type': 'application/json',
+                      'content-length': Buffer.byteLength(newConvBody)
+                    }
+                  }, function(nr) {
+                    nr.on('data', function() {});
+                    nr.on('end', function() {
+                      console.log('New teller conversation created');
+                      resolve(true);
+                    });
+                  }).on('error', resolve).end(newConvBody);
+                }
+              } catch(e) {
+                console.log('Conv search error:', e.message);
+                resolve(null);
+              }
+            });
+          }).on('error', resolve).end();
         } catch(e) {
-          console.log('WhatsApp teller error:', e.message);
+          console.log('Contact search error:', e.message);
           resolve(null);
         }
       });
-    });
-    req.on('error', resolve);
-    req.end();
+    }).on('error', resolve).end();
   });
 }
 
