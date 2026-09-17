@@ -115,6 +115,56 @@ function assignConversationToTeller(conversationId) {
   });
 }
 
+function makeVoiceCall(phone, message) {
+  return new Promise(function(resolve) {
+    if (!AT_API_KEY || !phone) {
+      console.log('Voice call not configured - skipping');
+      return resolve(null);
+    }
+
+    var callUrl = 'https://xchangeiq-production.up.railway.app/voice-alert';
+    var body = 'username=' + encodeURIComponent(AT_USERNAME) +
+      '&to=' + encodeURIComponent(phone) +
+      '&from=' + encodeURIComponent(process.env.AT_CALLER_ID || '') +
+      '&callActions=' + encodeURIComponent(JSON.stringify([{
+        say: { text: message, voice: 'woman', playBeep: false }
+      }]));
+
+    var hostname = AT_USERNAME === 'sandbox' ? 'voice.sandbox.africastalking.com' : 'voice.africastalking.com';
+    
+    var callBody = 'username=' + encodeURIComponent(AT_USERNAME) +
+      '&to=' + encodeURIComponent(phone);
+
+    var options = {
+      hostname: hostname,
+      path: '/call',
+      method: 'POST',
+      headers: {
+        'apiKey': AT_API_KEY,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+        'Content-Length': Buffer.byteLength(callBody)
+      }
+    };
+
+    var req = https.request(options, function(res) {
+      var data = '';
+      res.on('data', function(chunk) { data += chunk; });
+      res.on('end', function() {
+        console.log('Voice call initiated! Response:', data.substring(0, 100));
+        resolve(data);
+      });
+    });
+    req.on('error', function(err) {
+      console.log('Voice call error:', err.message);
+      resolve(null);
+    });
+    setTimeout(function() { req.destroy(); resolve(null); }, 10000);
+    req.write(callBody);
+    req.end();
+  });
+}
+
 function sendWhatsAppToTeller(phone, message) {
   return new Promise(function(resolve) {
     if (!CHATWOOT_TOKEN || !phone) return resolve(null);
@@ -726,6 +776,11 @@ var server = http.createServer(function(req, res) {
           var vipSMS = 'VIP ALERT! Customer: ' + senderName + ' wants to ' + (calculation ? calculation.direction + ' ' + calculation.amount.toLocaleString() + ' ' + calculation.currency : 'large transaction') + '. Contact NOW for preferential rate! - AfriDesk';
           await sendSMS(TELLER_PHONE, vipSMS);
           await sendWhatsAppToTeller(TELLER_WHATSAPP, tellerNote);
+          // Voice call for high value VIP
+          if (calculation && calculation.amount >= 10000) {
+            var voiceMsg = 'Alert! A high value VIP customer needs assistance. Amount: ' + calculation.amount.toLocaleString() + ' ' + calculation.currency + '. Please open Chatwoot immediately.';
+            await makeVoiceCall(TELLER_PHONE, voiceMsg);
+          }
           console.log('VIP alert sent!');
         }
 
