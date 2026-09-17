@@ -79,6 +79,74 @@ const ADMIN_PHONES = (process.env.ADMIN_PHONES || '').split(',').filter(Boolean)
 const AT_API_KEY = process.env.AT_API_KEY;
 const AT_USERNAME = process.env.AT_USERNAME || 'sandbox';
 const TELLER_PHONE = process.env.TELLER_PHONE;
+const TELLER_WHATSAPP = process.env.TELLER_WHATSAPP || process.env.TELLER_PHONE;
+
+function sendWhatsAppToTeller(phone, message) {
+  return new Promise(function(resolve) {
+    if (!CHATWOOT_TOKEN || !phone) return resolve(null);
+    
+    // Create or find contact and send message via Chatwoot API
+    var searchBody = JSON.stringify({ q: phone });
+    var searchOptions = {
+      hostname: CHATWOOT_URL,
+      path: '/api/v1/accounts/1/contacts/search?q=' + encodeURIComponent(phone) + '&include_contacts=true',
+      method: 'GET',
+      headers: {
+        'api_access_token': CHATWOOT_TOKEN,
+        'Content-Type': 'application/json'
+      }
+    };
+
+    var req = https.request(searchOptions, function(res) {
+      var data = '';
+      res.on('data', function(chunk) { data += chunk; });
+      res.on('end', function() {
+        try {
+          var result = JSON.parse(data);
+          var contactId = result.payload && result.payload[0] && result.payload[0].id;
+          if (contactId) {
+            // Send new conversation to teller
+            var convBody = JSON.stringify({
+              inbox_id: 1,
+              contact_id: contactId,
+              additional_attributes: {},
+              message: { content: message }
+            });
+            var convOptions = {
+              hostname: CHATWOOT_URL,
+              path: '/api/v1/accounts/1/conversations',
+              method: 'POST',
+              headers: {
+                'api_access_token': CHATWOOT_TOKEN,
+                'Content-Type': 'application/json',
+                'content-length': Buffer.byteLength(convBody)
+              }
+            };
+            var convReq = https.request(convOptions, function(r) {
+              var d = '';
+              r.on('data', function(c) { d += c; });
+              r.on('end', function() {
+                console.log('WhatsApp teller alert sent!');
+                resolve(d);
+              });
+            });
+            convReq.on('error', resolve);
+            convReq.write(convBody);
+            convReq.end();
+          } else {
+            console.log('Teller contact not found in Chatwoot');
+            resolve(null);
+          }
+        } catch(e) {
+          console.log('WhatsApp teller error:', e.message);
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', resolve);
+    req.end();
+  });
+}
 
 function sendSMS(phone, message) {
   return new Promise(function(resolve) {
@@ -577,6 +645,7 @@ var server = http.createServer(function(req, res) {
           // SMS alert to teller
           var vipSMS = 'VIP ALERT! Customer: ' + senderName + ' wants to ' + (calculation ? calculation.direction + ' ' + calculation.amount.toLocaleString() + ' ' + calculation.currency : 'large transaction') + '. Contact NOW for preferential rate! - AfriDesk';
           await sendSMS(TELLER_PHONE, vipSMS);
+          await sendWhatsAppToTeller(TELLER_WHATSAPP, tellerNote);
           console.log('VIP alert sent!');
         }
 
@@ -587,6 +656,7 @@ var server = http.createServer(function(req, res) {
           // SMS alert to teller for bargain
           var bargainSMS = 'BARGAIN ALERT! Customer: ' + senderName + ' is negotiating rates. Contact ASAP! - AfriDesk';
           await sendSMS(TELLER_PHONE, bargainSMS);
+          await sendWhatsAppToTeller(TELLER_WHATSAPP, bargainNote);
           console.log('Bargain alert sent!');
         }
 
