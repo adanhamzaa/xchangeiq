@@ -287,10 +287,9 @@ function sendSMS(phone, message) {
     // Use Mobile Sasa if token available, otherwise Africa's Talking
     if (MOBILESASA_TOKEN) {
       var body = JSON.stringify({
-        token: MOBILESASA_TOKEN,
-        sender_id: 'MOBILESASA',
-        message: message,
-        phone: phone.replace('+', '')
+        senderID: 'MOBILESASA',
+        phone: phone,
+        message: message
       });
 
       var options = {
@@ -298,6 +297,7 @@ function sendSMS(phone, message) {
         path: '/v1/send/message',
         method: 'POST',
         headers: {
+          'Authorization': 'Bearer ' + MOBILESASA_TOKEN,
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'Content-Length': Buffer.byteLength(body)
