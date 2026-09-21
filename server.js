@@ -82,6 +82,7 @@ const TELLER_PHONE = process.env.TELLER_PHONE;
 const MOBILESASA_TOKEN = process.env.MOBILESASA_TOKEN;
 const TELLER_WHATSAPP = process.env.TELLER_WHATSAPP || process.env.TELLER_PHONE;
 const TELLER_AGENT_ID = process.env.TELLER_AGENT_ID || '2';
+const VIP_THRESHOLD_KES = parseInt(process.env.VIP_THRESHOLD_KES || '650000');
 
 function assignConversationToTeller(conversationId) {
   return new Promise(function(resolve) {
@@ -740,6 +741,37 @@ var server = http.createServer(function(req, res) {
           return;
         }
 
+        // NODE.JS BARGAIN DETECTION - more reliable than Claude
+        var bargainKeywords = [
+          'better rate', 'cheaper', 'negotiate', 'negotiating', 'discount',
+          'can you do', 'beat that', 'match the rate', 'match their rate',
+          'other bureau', 'competitor', 'offered me', 'giving me',
+          'last price', 'best price', 'reduce', 'lower rate', 'improve',
+          'too low', 'too high', 'not good enough', 'elsewhere',
+          'another place', 'down a bit', 'little more', 'kidogo zaidi',
+          'punguza', 'bei nzuri', 'wanipe', 'wanapea', 'wameniambia'
+        ];
+
+        // COMPLAINT DETECTION
+        var complaintKeywords = [
+          'complaint', 'complain', 'unhappy', 'disappointed', 'terrible',
+          'worst', 'bad service', 'fraud', 'cheat', 'cheated', 'scam',
+          'scammed', 'lied', 'wrong rate', 'wrong amount', 'overcharged',
+          'report', 'police', 'lawyer', 'sue', 'legal', 'manager',
+          'supervisor', 'refund', 'money back', 'return my money',
+          'never coming back', 'lost money', 'stole', 'stolen',
+          'malalamiko', 'nimedanganywa', 'vibaya', 'hasara', 'pesa yangu',
+          'rejesha', 'rudisha', 'nimeibiwa', 'wizi'
+        ];
+
+        var msgLower = currentMessage.toLowerCase();
+        var nodeDetectedBargain = bargainKeywords.some(function(kw) {
+          return msgLower.includes(kw);
+        });
+        var nodeDetectedComplaint = complaintKeywords.some(function(kw) {
+          return msgLower.includes(kw);
+        });
+
         // COMPETITOR INTELLIGENCE: Log competitor mentions
         var competitor = detectCompetitor(currentMessage);
         if (competitor) {
@@ -814,7 +846,7 @@ var server = http.createServer(function(req, res) {
             direction: dir,
             rate: dir === 'sell' ? rate.buy : rate.sell,
             kes: kesAmount,
-            isVip: intent.amount >= 5000 && (intent.currency === 'USD' || (intent.amount * rate.buy) >= 650000)
+            isVip: (intent.amount * rate.buy) >= VIP_THRESHOLD_KES
           };
           console.log('Calc:', dir, intent.amount, intent.currency, '=', kesAmount, 'KES');
         }
@@ -832,11 +864,36 @@ var server = http.createServer(function(req, res) {
         if (calculation) {
           userContent += 'CALCULATION RESULT: Customer wants to ' + calculation.direction + ' ' + calculation.amount.toLocaleString() + ' ' + calculation.currency + '. Rate: ' + calculation.rate + ' KES. Total: KSh ' + calculation.kes.toLocaleString() + '. VIP: ' + calculation.isVip + '\n';
         }
+        // Check for pending deals in history
+        var pendingDeal = null;
+        if (history.length > 0) {
+          for (var ph = history.length - 1; ph >= 0; ph--) {
+            if (history[ph].role === 'user') {
+              var phIntent = detectIntent(history[ph].content);
+              if (phIntent.currency && phIntent.amount) {
+                var phTime = history.length - ph;
+                if (phTime <= 10) { // Within last 5 exchanges
+                  pendingDeal = {
+                    currency: phIntent.currency,
+                    amount: phIntent.amount,
+                    direction: phIntent.direction || 'sell',
+                    message: history[ph].content
+                  };
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        if (pendingDeal && (!calculation || pendingDeal.currency !== (calculation && calculation.currency))) {
+          userContent += 'PENDING DEAL: ' + pendingDeal.direction + ' ' + String(pendingDeal.amount) + ' ' + pendingDeal.currency + ' - follow up naturally';
+        }
         userContent += 'Customer message: ' + currentMessage;
 
         claudeMessages.push({ role: 'user', content: userContent });
 
-        var system = 'You are Hassan, a warm witty and persuasive forex assistant at AfriDesk Forex Bureau, Nairobi Kenya. BUSINESS INFO: Hours: Monday-Saturday 8AM-5PM, Sunday 8AM-3PM. Branches: Standard Street CBD and Wabera Street CBD. Phone: +254787510515.\n\nCORE RULES:\n1. Always respond with ONLY valid JSON - nothing else\n2. Use customer name naturally\n3. Reply in same language as customer (English/Swahili/Sheng/Somali)\n4. Use conversation history - never ask for info already given\n5. NEVER calculate rates yourself - use CALCULATION RESULT if provided\n6. Share CALCULATION RESULT numbers naturally\n\nRATE DIRECTION RULES:\n7. Customer SELLING foreign currency (has USD/EUR/CNY wants KES) = they get BUY rate\n8. Customer BUYING foreign currency (wants USD/EUR/CNY pays KES) = they pay SELL rate\n9. NEVER agree to a rate the customer requests. If customer asks can I get 130 for USD reply: Our current buy rate is 128.5 - our senior dealer will confirm the best possible rate for your amount\n10. Never promise to match competitor rates - always escalate to dealer\n\nSALES RULES:\n11. When customer mentions competitor rate - acknowledge then create urgency and escalate\n12. Create urgency naturally - rates change every hour\n13. Offer to connect customer with senior dealer for better rate\n14. Be trusted advisor not pushy salesman\n\nBARGAINING RULES:\n15. If customer insists on better rate or bargains - set is_bargain to true\n16. Tell customer senior dealer will contact them personally\n17. Always make customer feel valued and important\n\nVIP RULES:\n18. VIP: true means senior teller will contact for preferential rate\n19. Large amounts always deserve personal attention\n\nCLOSING RULES:\n20. After providing calculation or completing an exchange inquiry always end with a warm closing: mention our branches (Standard Street CBD or Wabera Street CBD) naturally\n21. After transaction calculation say: Our senior dealer will contact you shortly to confirm and finalize your transaction\n22. Always make customer feel valued - they are not just a transaction\n\nJSON FORMAT:\n{"intent":"greeting|rates|exchange|smalltalk|bargain|other","direction":"buy|sell|null","currency":"USD|EUR|GBP|AED|CNY|CAD|AUD|INR|null","amount":null,"is_vip":false,"is_bargain":false,"reply":"your natural response"}';
+        var system = 'You are Hassan, a warm witty and persuasive forex assistant at AfriDesk Forex Bureau, Nairobi Kenya. You are also a skilled sales closer who never lets a deal slip away. BUSINESS INFO: Hours: Monday-Saturday 8AM-5PM, Sunday 8AM-3PM. Branches: Standard Street CBD and Wabera Street CBD. Phone: +254787510515.\n\nCORE RULES:\n1. Always respond with ONLY valid JSON - nothing else\n2. Use customer name naturally\n3. Reply in same language as customer (English/Swahili/Sheng/Somali)\n4. Use conversation history - never ask for info already given\n5. NEVER calculate rates yourself - use CALCULATION RESULT if provided\n6. Share CALCULATION RESULT numbers naturally\n\nRATE DIRECTION RULES:\n7. Customer SELLING foreign currency (has USD/EUR/CNY wants KES) = they get BUY rate\n8. Customer BUYING foreign currency (wants USD/EUR/CNY pays KES) = they pay SELL rate\n9. NEVER agree to a rate the customer requests. If customer asks can I get 130 for USD reply: Our current buy rate is 128.5 - our senior dealer will confirm the best possible rate for your amount\n10. Never promise to match competitor rates - always escalate to dealer\n\nSALES RULES:\n11. When customer mentions competitor rate - acknowledge then create urgency and escalate\n12. Create urgency naturally - rates change every hour\n13. Offer to connect customer with senior dealer for better rate\n14. Be trusted advisor not pushy salesman\n\nBARGAINING RULES:\n15. If customer insists on better rate or bargains - set is_bargain to true\n16. Tell customer senior dealer will contact them personally\n17. Always make customer feel valued and important\n\nVIP RULES:\n18. VIP: true means senior teller will contact for preferential rate\n19. Large amounts always deserve personal attention\n\nCLOSING RULES:\n20. After providing calculation or completing an exchange inquiry always end with a warm closing: mention our branches (Standard Street CBD or Wabera Street CBD) naturally\n21. After transaction calculation say: Our senior dealer will contact you shortly to confirm and finalize your transaction\n22. Always make customer feel valued - they are not just a transaction\n\nCOMPLAINT RULES:\n23. If customer complains about service, wrong rate, or lost money - be extremely apologetic and empathetic\n24. Immediately assure them a manager will contact them urgently\n25. Never argue or dismiss a complaint - take it seriously\n26. Say: I am deeply sorry for this experience. I am escalating this to our manager RIGHT NOW as urgent priority.\n\nFOLLOW-UP RULES:\n23. Check conversation history for any PENDING deals or previous rate inquiries\n24. If customer asked about a transaction earlier but never confirmed - follow up naturally: example: By the way you mentioned selling 10000 USD earlier - did you manage to sort that out? Our dealer is still available!\n25. If customer switches to a new currency inquiry - acknowledge it AND follow up on previous inquiry\n26. Never let a deal die silently - always check if previous inquiry was resolved\n27. If customer has been asking multiple questions - summarize and push for decision: You have asked about USD EUR and GBP today - which one shall we process first?\n28. Create gentle urgency: Rates change every hour - shall we lock this in now?\n\nJSON FORMAT:\n{"intent":"greeting|rates|exchange|smalltalk|bargain|other","direction":"buy|sell|null","currency":"USD|EUR|GBP|AED|CNY|CAD|AUD|INR|null","amount":null,"is_vip":false,"is_bargain":false,"reply":"your natural response"}';
 
 
         var claudeRaw = await callClaude(claudeMessages, system);
@@ -854,7 +911,8 @@ var server = http.createServer(function(req, res) {
         }
 
         var isVip = (calculation && calculation.isVip) || aiData.is_vip === true;
-        var isBargain = aiData.is_bargain === true;
+        var isBargain = aiData.is_bargain === true || nodeDetectedBargain;
+        if (nodeDetectedBargain) console.log('Node.js detected bargain!');
 
         // Save to history including conversation_id
         var updatedHistory = history.slice();
@@ -891,13 +949,22 @@ var server = http.createServer(function(req, res) {
         if (isBargain && !isVip) {
           var bargainNote = '💬 BARGAIN REQUEST\n👤 Customer: ' + senderName + (customerPhone ? '\n📞 Phone: ' + customerPhone : '') + '\n💱 Currency: ' + (calculation ? calculation.currency : aiData.currency || '?') + '\n💰 Amount: ' + (calculation ? calculation.amount.toLocaleString() : 'Unknown') + '\n📝 "' + currentMessage + '"\n⚡ Customer is negotiating — senior dealer should contact ASAP!';
           await sendChatwootMessage(conversationId, bargainNote, true);
-          // Assign conversation to teller
           await assignConversationToTeller(conversationId);
-          // SMS alert to teller for bargain
-          var bargainSMS = 'BARGAIN ALERT! Customer: ' + senderName + ' is negotiating rates. Contact ASAP! - AfriDesk';
+          var bargainSMS = 'BARGAIN ALERT! Customer: ' + senderName + (customerPhone ? ' ' + customerPhone : '') + ' is negotiating. Contact ASAP! - AfriDesk';
           await sendSMS(TELLER_PHONE, bargainSMS);
           await sendWhatsAppToTeller(TELLER_WHATSAPP, bargainNote);
           console.log('Bargain alert sent!');
+        }
+
+        // Send COMPLAINT alert
+        if (nodeDetectedComplaint) {
+          var complaintNote = '🚨 CUSTOMER COMPLAINT\n👤 Customer: ' + senderName + (customerPhone ? '\n📞 Phone: ' + customerPhone : '') + '\n📝 "' + currentMessage + '"\n⚠️ URGENT: Manager must contact customer immediately!';
+          await sendChatwootMessage(conversationId, complaintNote, true);
+          await assignConversationToTeller(conversationId);
+          var complaintSMS = '🚨 COMPLAINT! Customer: ' + senderName + (customerPhone ? ' ' + customerPhone : '') + ' - "' + currentMessage.substring(0, 80) + '" - Contact IMMEDIATELY! - AfriDesk';
+          await sendSMS(TELLER_PHONE, complaintSMS);
+          await sendWhatsAppToTeller(TELLER_WHATSAPP, complaintNote);
+          console.log('Complaint alert sent!');
         }
 
         await sendChatwootMessage(conversationId, reply, false);
