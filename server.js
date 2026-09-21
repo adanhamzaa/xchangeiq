@@ -116,6 +116,57 @@ function assignConversationToTeller(conversationId) {
   });
 }
 
+// Get active customers from last 24 hours
+async function getActiveCustomers() {
+  try {
+    var result = await queryDB(
+      "SELECT customer_id, messages FROM conversations WHERE updated_at > NOW() - INTERVAL '24 hours'" 
+    );
+    return result.rows || [];
+  } catch(e) {
+    console.log('Get active customers error:', e.message);
+    return [];
+  }
+}
+
+// Send morning rates broadcast to active customers
+async function sendMorningBroadcast() {
+  try {
+    var nairobi = new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' });
+    console.log('Morning broadcast starting:', nairobi);
+
+    // Get current rates
+    var rates = await getRates();
+    var rateMsg = "Good morning! Today rates: USD Buy " + rates.USD.buy + " Sell " + rates.USD.sell + ". EUR Buy " + rates.EUR.buy + " Sell " + rates.EUR.sell + ". GBP Buy " + rates.GBP.buy + " Sell " + rates.GBP.sell + ". Visit Standard Street or Wabera CBD. Open 8AM-5PM. +254787510515";   // Get active customers
+    var customers = await getActiveCustomers();
+    console.log('Active customers to broadcast:', customers.length);
+
+    // Send to each active customer via Chatwoot
+    var sent = 0;
+    for (var i = 0; i < customers.length; i++) {
+      var customerId = customers[i].customer_id;
+      try {
+        // Find their Chatwoot conversation
+        var convResult = await queryDB(
+          'SELECT customer_id FROM conversations WHERE customer_id=$1',
+          [customerId]
+        );
+        if (convResult.rows.length > 0) {
+          await sendChatwootMessage(customerId, rateMsg, false);
+          sent++;
+          // Small delay to avoid rate limiting
+          await new Promise(function(r) { setTimeout(r, 500); });
+        }
+      } catch(e) {
+        console.log('Broadcast error for customer:', customerId, e.message);
+      }
+    }
+    console.log('Morning broadcast complete! Sent to:', sent, 'customers');
+  } catch(e) {
+    console.log('Morning broadcast failed:', e.message);
+  }
+}
+
 function makeVoiceCall(phone, message) {
   return new Promise(function(resolve) {
     if (!AT_API_KEY || !phone) {
@@ -858,6 +909,34 @@ server.listen(PORT, async function() {
   console.log('AfriDesk API starting on port ' + PORT);
   await setupDB();
   console.log('AfriDesk Ready!');
+
+  // Morning broadcast at 9AM Nairobi time every day
+  function scheduleMorningBroadcast() {
+    var now = new Date();
+    var nairobi = new Date(now.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
+    var nextBroadcast = new Date(nairobi);
+    nextBroadcast.setHours(9, 0, 0, 0);
+    
+    // If already past 9AM today, schedule for tomorrow
+    if (nairobi.getHours() >= 9) {
+      nextBroadcast.setDate(nextBroadcast.getDate() + 1);
+    }
+    
+    var msUntilBroadcast = nextBroadcast - nairobi;
+    console.log('Morning broadcast scheduled in', Math.round(msUntilBroadcast / 60000), 'minutes');
+    
+    setTimeout(async function() {
+      // Only broadcast on business days
+      if (isBusinessOpen()) {
+        await sendMorningBroadcast();
+      }
+      // Schedule next day
+      scheduleMorningBroadcast();
+    }, msUntilBroadcast);
+  }
+  
+  scheduleMorningBroadcast();
+  console.log('Morning broadcast scheduler started!');
 
   // Sync rates from Google Sheet every 5 minutes
   if (GOOGLE_SHEET_URL) {
