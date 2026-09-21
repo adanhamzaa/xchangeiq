@@ -148,11 +148,11 @@ async function sendMorningBroadcast() {
       try {
         // Find their Chatwoot conversation
         var convResult = await queryDB(
-          'SELECT customer_id FROM conversations WHERE customer_id=$1',
+          'SELECT conversation_id FROM conversations WHERE customer_id=$1 AND conversation_id IS NOT NULL',
           [customerId]
         );
-        if (convResult.rows.length > 0) {
-          await sendChatwootMessage(customerId, rateMsg, false);
+        if (convResult.rows.length > 0 && convResult.rows[0].conversation_id) {
+          await sendChatwootMessage(convResult.rows[0].conversation_id, rateMsg, false);
           sent++;
           // Small delay to avoid rate limiting
           await new Promise(function(r) { setTimeout(r, 500); });
@@ -494,10 +494,12 @@ async function setupDB() {
     await queryDB(`
       CREATE TABLE IF NOT EXISTS conversations (
         customer_id VARCHAR(100) PRIMARY KEY,
+        conversation_id VARCHAR(100),
         messages JSONB DEFAULT '[]',
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `);
+    await queryDB('ALTER TABLE conversations ADD COLUMN IF NOT EXISTS conversation_id VARCHAR(100)').catch(function(){});
     // Always update rates on startup
     for (var cur in FALLBACK_RATES) {
       await queryDB(
@@ -854,11 +856,18 @@ var server = http.createServer(function(req, res) {
         var isVip = (calculation && calculation.isVip) || aiData.is_vip === true;
         var isBargain = aiData.is_bargain === true;
 
-        // Save to history
+        // Save to history including conversation_id
         var updatedHistory = history.slice();
         updatedHistory.push({ role: 'user', content: currentMessage });
         updatedHistory.push({ role: 'assistant', content: reply });
         await saveHistory(customerId, updatedHistory);
+        // Save conversation_id for broadcast
+        try {
+          await queryDB(
+            'UPDATE conversations SET conversation_id=$1 WHERE customer_id=$2',
+            [conversationId, customerId]
+          );
+        } catch(e) {}
 
         // Send VIP teller alert
         if (isVip) {
