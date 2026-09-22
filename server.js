@@ -138,7 +138,22 @@ async function sendMorningBroadcast() {
 
     // Get current rates
     var rates = await getRates();
-    var rateMsg = "Good morning! Today rates: USD Buy " + rates.USD.buy + " Sell " + rates.USD.sell + ". EUR Buy " + rates.EUR.buy + " Sell " + rates.EUR.sell + ". GBP Buy " + rates.GBP.buy + " Sell " + rates.GBP.sell + ". Visit Standard Street or Wabera CBD. Open 8AM-5PM. +254787510515";   // Get active customers
+    var today = new Date().toLocaleDateString('en-KE', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Africa/Nairobi' });
+    var rateMsg = 'Habari za asubuhi! Good morning! Karibu AfriDesk Forex Bureau. ' + today + '\n\n';
+    rateMsg += 'Hizi ndizo rates za leo:\n\n';
+    if (rates.USD) rateMsg += 'USD (Dollar)\nBuy: ' + rates.USD.buy + ' | Sell: ' + rates.USD.sell + '\n\n';
+    if (rates.EUR) rateMsg += 'EUR (Euro)\nBuy: ' + rates.EUR.buy + ' | Sell: ' + rates.EUR.sell + '\n\n';
+    if (rates.GBP) rateMsg += 'GBP (Pound)\nBuy: ' + rates.GBP.buy + ' | Sell: ' + rates.GBP.sell + '\n\n';
+    if (rates.AED) rateMsg += 'AED (Dirham)\nBuy: ' + rates.AED.buy + ' | Sell: ' + rates.AED.sell + '\n\n';
+    if (rates.CNY) rateMsg += 'CNY (Yuan)\nBuy: ' + rates.CNY.buy + ' | Sell: ' + rates.CNY.sell + '\n\n';
+    if (rates.CHF) rateMsg += 'CHF (Swiss Franc)\nBuy: ' + rates.CHF.buy + ' | Sell: ' + rates.CHF.sell + '\n\n';
+    if (rates.SAR) rateMsg += 'SAR (Saudi Riyal)\nBuy: ' + rates.SAR.buy + ' | Sell: ' + rates.SAR.sell + '\n\n';
+    if (rates.INR) rateMsg += 'INR (Rupee)\nBuy: ' + rates.INR.buy + ' | Sell: ' + rates.INR.sell + '\n\n';
+    rateMsg += 'Tuna matawi mawili:\n';
+    rateMsg += 'Standard Street CBD na Wabera Street CBD\n\n';
+    rateMsg += 'Tunafungua: Mon-Sat 8AM-5PM | Sun 8AM-3PM\n';
+    rateMsg += 'Simu: +254787510515\n\n';
+    rateMsg += 'Karibu sana! Have a productive day!';   // Get active customers
     var customers = await getActiveCustomers();
     console.log('Active customers to broadcast:', customers.length);
 
