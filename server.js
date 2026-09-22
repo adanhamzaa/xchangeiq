@@ -935,14 +935,26 @@ var server = http.createServer(function(req, res) {
         console.log('Claude raw:', claudeRaw.substring(0, 120));
 
         var aiData = parseClaudeResponse(claudeRaw);
+        
+        // If Claude returned plain text — use it directly
+        var reply;
         if (!aiData) {
-          aiData = { reply: 'Samahani, kuna hitilafu kidogo. Tafadhali jaribu tena! 😊', is_vip: false };
+          // Try using raw Claude response if it looks like natural text
+          var rawClean = claudeRaw ? claudeRaw.replace(/```json|```/gi, '').trim() : '';
+          if (rawClean.length > 10 && !rawClean.startsWith('{') && !rawClean.includes('"intent"')) {
+            reply = rawClean;
+            aiData = { is_vip: false, is_bargain: false };
+          } else {
+            aiData = { reply: 'Samahani, kuna hitilafu kidogo. Tafadhali jaribu tena!', is_vip: false };
+            reply = aiData.reply;
+          }
+        } else {
+          reply = String(aiData.reply || 'Karibu! How can I help you today?');
         }
-
-        var reply = String(aiData.reply || 'How can I help you?');
-        // Safety check - never send raw JSON
+        
+        // Safety check - never send raw JSON to customer
         if (reply.trim().startsWith('{') || reply.includes('"intent"') || reply.includes('"direction"')) {
-          reply = 'Karibu AfriDesk! How can I help you today? 😊';
+          reply = 'Karibu AfriDesk! How can I help you today?';
         }
 
         var isVip = (calculation && calculation.isVip) || aiData.is_vip === true;
