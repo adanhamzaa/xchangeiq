@@ -121,8 +121,9 @@ function assignConversationToTeller(conversationId) {
 async function getActiveCustomers() {
   try {
     var result = await queryDB(
-      "SELECT customer_id, messages FROM conversations WHERE updated_at > NOW() - INTERVAL '24 hours'" 
+      "SELECT customer_id, conversation_id FROM conversations WHERE updated_at > NOW() - INTERVAL '24 hours' AND conversation_id IS NOT NULL"
     );
+    console.log('Active customers found:', result.rows.length);
     return result.rows || [];
   } catch(e) {
     console.log('Get active customers error:', e.message);
@@ -160,21 +161,16 @@ async function sendMorningBroadcast() {
     // Send to each active customer via Chatwoot
     var sent = 0;
     for (var i = 0; i < customers.length; i++) {
-      var customerId = customers[i].customer_id;
+      var convId = customers[i].conversation_id;
+      if (!convId) continue;
       try {
-        // Find their Chatwoot conversation
-        var convResult = await queryDB(
-          'SELECT conversation_id FROM conversations WHERE customer_id=$1 AND conversation_id IS NOT NULL',
-          [customerId]
-        );
-        if (convResult.rows.length > 0 && convResult.rows[0].conversation_id) {
-          await sendChatwootMessage(convResult.rows[0].conversation_id, rateMsg, false);
-          sent++;
-          // Small delay to avoid rate limiting
-          await new Promise(function(r) { setTimeout(r, 500); });
-        }
+        await sendChatwootMessage(convId, rateMsg, false);
+        sent++;
+        console.log('Broadcast sent to conversation:', convId);
+        // Small delay to avoid rate limiting
+        await new Promise(function(r) { setTimeout(r, 1000); });
       } catch(e) {
-        console.log('Broadcast error for customer:', customerId, e.message);
+        console.log('Broadcast error for conversation:', convId, e.message);
       }
     }
     console.log('Morning broadcast complete! Sent to:', sent, 'customers');
@@ -714,6 +710,16 @@ var server = http.createServer(function(req, res) {
   if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200);
     res.end('AfriDesk API Running!');
+    return;
+  }
+
+  // Test broadcast endpoint - manual trigger
+  if (req.method === 'GET' && req.url === '/broadcast-now') {
+    res.writeHead(200);
+    res.end('Broadcast triggered!');
+    sendMorningBroadcast().then(function() {
+      console.log('Manual broadcast complete!');
+    });
     return;
   }
 
