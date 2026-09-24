@@ -393,6 +393,30 @@ var server = http.createServer(function(req, res) {
 
         // Admin rate update
         var senderPhone = String((payload.sender && payload.sender.phone_number) || '').replace(/\s/g, '');
+
+        // BROADCAST command - send message to ALL customers
+        if (currentMessage.toUpperCase().startsWith('BROADCAST ')) {
+          var broadcastMsg = currentMessage.substring(10).trim();
+          if (broadcastMsg.length > 0) {
+            await sendChatwootMessage(conversationId, 'Broadcasting your message to all customers now...', false);
+            var allCustomers = await queryDB("SELECT conversation_id FROM conversations WHERE conversation_id IS NOT NULL");
+            var bSent = 0;
+            for (var bi = 0; bi < allCustomers.rows.length; bi++) {
+              var bConvId = allCustomers.rows[bi].conversation_id;
+              if (bConvId && bConvId !== String(conversationId)) {
+                try {
+                  await sendChatwootMessage(bConvId, broadcastMsg, false);
+                  bSent++;
+                  await new Promise(function(r) { setTimeout(r, 1000); });
+                } catch(e) { console.log('Broadcast error:', e.message); }
+              }
+            }
+            await sendChatwootMessage(conversationId, 'Broadcast complete! Sent to ' + bSent + ' customers.', false);
+            console.log('Broadcast sent to', bSent, 'customers');
+            return;
+          }
+        }
+
         if (currentMessage.toUpperCase().startsWith('RATES ')) {
           var parts = currentMessage.toUpperCase().split(' ');
           if (parts.length >= 4) {
