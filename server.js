@@ -128,10 +128,10 @@ async function getHistory(customerId) {
   return [];
 }
 
-async function saveHistory(customerId, messages, conversationId) {
+async function saveHistory(customerId, messages, conversationId, phone) {
   try {
     var recent = messages.slice(-20);
-    await queryDB('INSERT INTO conversations (customer_id, conversation_id, messages, updated_at) VALUES ($1, $2, $3, NOW()) ON CONFLICT (customer_id) DO UPDATE SET conversation_id=$2, messages=$3, updated_at=NOW()', [customerId, conversationId, JSON.stringify(recent)]);
+    await queryDB('INSERT INTO conversations (customer_id, conversation_id, phone, messages, updated_at) VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (customer_id) DO UPDATE SET conversation_id=$2, phone=COALESCE($3, conversations.phone), messages=$4, updated_at=NOW()', [customerId, conversationId, phone || null, JSON.stringify(recent)]);
   } catch(e) { console.log('History save error:', e.message); }
 }
 
@@ -400,7 +400,7 @@ var server = http.createServer(function(req, res) {
           if (broadcastMsg.length > 0) {
             await sendChatwootMessage(conversationId, 'Broadcasting your message now — WhatsApp for active customers, SMS fallback for others...', false);
             // Get ALL customers with their details
-            var allCustomers = await queryDB("SELECT customer_id, conversation_id, messages, updated_at FROM conversations WHERE conversation_id IS NOT NULL");
+            var allCustomers = await queryDB("SELECT customer_id, conversation_id, phone, messages, updated_at FROM conversations WHERE conversation_id IS NOT NULL");
             var waSent = 0;
             var smsSent = 0;
             var now = new Date();
@@ -423,7 +423,10 @@ var server = http.createServer(function(req, res) {
                 var msgs = cust.messages || [];
                 var custPhone = null;
                 // Try to get phone from customer_id (often contains phone)
-                if (cust.customer_id && cust.customer_id.match(/\d{10,}/)) {
+                // First try phone from database
+                if (cust.phone) {
+                  custPhone = cust.phone.replace(/\D/g, '');
+                } else if (cust.customer_id && cust.customer_id.length > 8) {
                   custPhone = cust.customer_id.replace(/\D/g, '');
                 }
                 if (custPhone) {
@@ -560,7 +563,7 @@ var server = http.createServer(function(req, res) {
         var updatedHistory = history.slice();
         updatedHistory.push({ role: 'user', content: currentMessage });
         updatedHistory.push({ role: 'assistant', content: reply });
-        await saveHistory(customerId, updatedHistory, String(conversationId));
+        await saveHistory(customerId, updatedHistory, String(conversationId), customerPhone || null);
 
         // VIP alert
         if (isVip) {
