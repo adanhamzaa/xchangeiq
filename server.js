@@ -394,25 +394,50 @@ var server = http.createServer(function(req, res) {
         // Admin rate update
         var senderPhone = String((payload.sender && payload.sender.phone_number) || '').replace(/\s/g, '');
 
-        // BROADCAST command - send message to ALL customers
+        // BROADCAST command - smart WhatsApp + SMS fallback
         if (currentMessage.toUpperCase().startsWith('BROADCAST ')) {
           var broadcastMsg = currentMessage.substring(10).trim();
           if (broadcastMsg.length > 0) {
-            await sendChatwootMessage(conversationId, 'Broadcasting your message to all customers now...', false);
-            var allCustomers = await queryDB("SELECT conversation_id FROM conversations WHERE conversation_id IS NOT NULL");
-            var bSent = 0;
+            await sendChatwootMessage(conversationId, 'Broadcasting your message now — WhatsApp for active customers, SMS fallback for others...', false);
+            // Get ALL customers with their details
+            var allCustomers = await queryDB("SELECT customer_id, conversation_id, messages, updated_at FROM conversations WHERE conversation_id IS NOT NULL");
+            var waSent = 0;
+            var smsSent = 0;
+            var now = new Date();
             for (var bi = 0; bi < allCustomers.rows.length; bi++) {
-              var bConvId = allCustomers.rows[bi].conversation_id;
-              if (bConvId && bConvId !== String(conversationId)) {
+              var cust = allCustomers.rows[bi];
+              if (cust.conversation_id === String(conversationId)) continue;
+              // Check if within 24 hour window
+              var lastActive = new Date(cust.updated_at);
+              var hoursAgo = (now - lastActive) / (1000 * 60 * 60);
+              if (hoursAgo <= 24) {
+                // WhatsApp is open — send via Chatwoot
                 try {
-                  await sendChatwootMessage(bConvId, broadcastMsg, false);
-                  bSent++;
-                  await new Promise(function(r) { setTimeout(r, 1000); });
-                } catch(e) { console.log('Broadcast error:', e.message); }
+                  await sendChatwootMessage(cust.conversation_id, broadcastMsg, false);
+                  waSent++;
+                  await new Promise(function(r) { setTimeout(r, 500); });
+                } catch(e) { console.log('WA broadcast error:', e.message); }
+              } else {
+                // WhatsApp window closed — fallback to SMS
+                // Extract phone from messages history
+                var msgs = cust.messages || [];
+                var custPhone = null;
+                // Try to get phone from customer_id (often contains phone)
+                if (cust.customer_id && cust.customer_id.match(/\d{10,}/)) {
+                  custPhone = cust.customer_id.replace(/\D/g, '');
+                }
+                if (custPhone) {
+                  try {
+                    await sendSMS(custPhone, broadcastMsg + ' -AfriDesk +254787510515');
+                    smsSent++;
+                    await new Promise(function(r) { setTimeout(r, 500); });
+                  } catch(e) { console.log('SMS fallback error:', e.message); }
+                }
               }
             }
-            await sendChatwootMessage(conversationId, 'Broadcast complete! Sent to ' + bSent + ' customers.', false);
-            console.log('Broadcast sent to', bSent, 'customers');
+            var summary = 'Broadcast complete! WhatsApp: ' + waSent + ' customers. SMS fallback: ' + smsSent + ' customers. Total reached: ' + (waSent + smsSent);
+            await sendChatwootMessage(conversationId, summary, false);
+            console.log('Smart broadcast complete! WA:', waSent, 'SMS:', smsSent);
             return;
           }
         }
