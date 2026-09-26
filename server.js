@@ -358,6 +358,109 @@ var server = http.createServer(function(req, res) {
   if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200); res.end('AfriDesk API Running!'); return;
   }
+
+  // WatchParty AI test endpoint
+  if (req.method === 'GET' && req.url === '/watchparty-test') {
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    var apiKey = process.env.FOOTBALL_API_KEY || '';
+    if (!apiKey) { res.end(JSON.stringify({error: 'No FOOTBALL_API_KEY set'})); return; }
+    
+    // Test API connection
+    var options = {
+      hostname: 'v3.football.api-sports.io',
+      path: '/status',
+      method: 'GET',
+      headers: { 'x-apisports-key': apiKey }
+    };
+    var apiReq = https.request(options, function(apiRes) {
+      var data = '';
+      apiRes.on('data', function(chunk) { data += chunk; });
+      apiRes.on('end', function() {
+        try {
+          var result = JSON.parse(data);
+          res.end(JSON.stringify({
+            success: true,
+            account: result.response && result.response.account,
+            requests: result.response && result.response.requests
+          }));
+        } catch(e) { res.end(JSON.stringify({error: 'Parse error', raw: data.substring(0, 200)})); }
+      });
+    });
+    apiReq.on('error', function(e) { res.end(JSON.stringify({error: e.message})); });
+    apiReq.end();
+    return;
+  }
+
+  // WatchParty live matches endpoint
+  if (req.method === 'GET' && req.url === '/watchparty-live') {
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    var apiKey = process.env.FOOTBALL_API_KEY || '';
+    if (!apiKey) { res.end(JSON.stringify({error: 'No FOOTBALL_API_KEY set'})); return; }
+    
+    var options = {
+      hostname: 'v3.football.api-sports.io',
+      path: '/fixtures?live=all',
+      method: 'GET',
+      headers: { 'x-apisports-key': apiKey }
+    };
+    var apiReq = https.request(options, function(apiRes) {
+      var data = '';
+      apiRes.on('data', function(chunk) { data += chunk; });
+      apiRes.on('end', function() {
+        try {
+          var result = JSON.parse(data);
+          var matches = (result.response || []).map(function(m) {
+            return {
+              home: m.teams.home.name,
+              away: m.teams.away.name,
+              score: m.goals.home + '-' + m.goals.away,
+              minute: m.fixture.status.elapsed,
+              fixture_id: m.fixture.id
+            };
+          });
+          res.end(JSON.stringify({live_matches: matches, count: matches.length}));
+        } catch(e) { res.end(JSON.stringify({error: 'Parse error', raw: data.substring(0, 200)})); }
+      });
+    });
+    apiReq.on('error', function(e) { res.end(JSON.stringify({error: e.message})); });
+    apiReq.end();
+    return;
+  }
+
+  // WatchParty upcoming EPL matches
+  if (req.method === 'GET' && req.url === '/watchparty-epl') {
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    var apiKey = process.env.FOOTBALL_API_KEY || '';
+    if (!apiKey) { res.end(JSON.stringify({error: 'No FOOTBALL_API_KEY set'})); return; }
+    
+    var options = {
+      hostname: 'v3.football.api-sports.io',
+      path: '/fixtures?league=39&season=2026&next=10',
+      method: 'GET',
+      headers: { 'x-apisports-key': apiKey }
+    };
+    var apiReq = https.request(options, function(apiRes) {
+      var data = '';
+      apiRes.on('data', function(chunk) { data += chunk; });
+      apiRes.on('end', function() {
+        try {
+          var result = JSON.parse(data);
+          var matches = (result.response || []).map(function(m) {
+            return {
+              home: m.teams.home.name,
+              away: m.teams.away.name,
+              date: m.fixture.date,
+              fixture_id: m.fixture.id
+            };
+          });
+          res.end(JSON.stringify({epl_matches: matches, count: matches.length}));
+        } catch(e) { res.end(JSON.stringify({error: 'Parse error', raw: data.substring(0, 200)})); }
+      });
+    });
+    apiReq.on('error', function(e) { res.end(JSON.stringify({error: e.message})); });
+    apiReq.end();
+    return;
+  }
   if (req.method === 'GET' && req.url === '/broadcast-now') {
     res.writeHead(200); res.end('Broadcast triggered!');
     sendMorningBroadcast(); return;
@@ -635,19 +738,32 @@ server.listen(PORT, async function() {
     }, 5 * 60 * 1000);
   }
 
-  function scheduleMorningBroadcast() {
+  // Track last broadcast date
+  var lastBroadcastDate = '';
+
+  // Check every 5 minutes if broadcast should fire
+  setInterval(async function() {
     var now = new Date();
     var nairobi = new Date(now.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
-    var nextBroadcast = new Date(nairobi);
-    nextBroadcast.setHours(9, 0, 0, 0);
-    if (nairobi.getHours() >= 9) nextBroadcast.setDate(nextBroadcast.getDate() + 1);
-    var msUntilBroadcast = nextBroadcast - nairobi;
-    console.log('Morning broadcast scheduled in', Math.round(msUntilBroadcast / 60000), 'minutes');
-    setTimeout(async function() {
-      if (isBusinessOpen()) await sendMorningBroadcast();
-      scheduleMorningBroadcast();
-    }, msUntilBroadcast);
+    var hour = nairobi.getHours();
+    var minute = nairobi.getMinutes();
+    var today = nairobi.toDateString();
+    // Fire between 9:00AM and 9:30AM if not already sent today
+    if (hour === 9 && minute <= 30 && lastBroadcastDate !== today) {
+      console.log('Morning broadcast time! Firing...');
+      lastBroadcastDate = today;
+      await sendMorningBroadcast();
+    }
+  }, 5 * 60 * 1000);
+  console.log('Morning broadcast scheduler started! Checks every 5 minutes.');
+  // Also check immediately on startup in case we missed 9AM
+  var nowCheck = new Date();
+  var nairobiCheck = new Date(nowCheck.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
+  var hourCheck = nairobiCheck.getHours();
+  var minuteCheck = nairobiCheck.getMinutes();
+  if (hourCheck === 9 && minuteCheck <= 30) {
+    console.log('Startup during broadcast window - firing immediately!');
+    sendMorningBroadcast();
+    lastBroadcastDate = nairobiCheck.toDateString();
   }
-  scheduleMorningBroadcast();
-  console.log('Morning broadcast scheduler started!');
 });
