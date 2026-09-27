@@ -98,6 +98,7 @@ async function setupDB() {
     await queryDB('CREATE TABLE IF NOT EXISTS rates (currency VARCHAR(10) PRIMARY KEY, buy_rate DECIMAL(10,4), sell_rate DECIMAL(10,4), updated_at TIMESTAMP DEFAULT NOW())');
     await queryDB('CREATE TABLE IF NOT EXISTS conversations (customer_id VARCHAR(100) PRIMARY KEY, conversation_id VARCHAR(100), messages JSONB DEFAULT \'[]\', updated_at TIMESTAMP DEFAULT NOW())');
     await queryDB('ALTER TABLE conversations ADD COLUMN IF NOT EXISTS conversation_id VARCHAR(100)').catch(function(){});
+    await queryDB('ALTER TABLE conversations ADD COLUMN IF NOT EXISTS phone VARCHAR(20)').catch(function(){});
     for (var cur in FALLBACK_RATES) {
       await queryDB('INSERT INTO rates (currency, buy_rate, sell_rate) VALUES ($1, $2, $3) ON CONFLICT (currency) DO UPDATE SET buy_rate=$2, sell_rate=$3, updated_at=NOW()', [cur, FALLBACK_RATES[cur].buy, FALLBACK_RATES[cur].sell]);
     }
