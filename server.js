@@ -322,6 +322,97 @@ async function getActiveCustomers() {
   } catch(e) { console.log('Get active customers error:', e.message); return []; }
 }
 
+async function generateEveningPing(wasServed, language, messages) {
+  try {
+    var lastMessages = messages.slice(-6).map(function(m) { return m.role + ': ' + String(m.content || '').substring(0, 100); }).join(' | ');
+    var situation = wasServed ? 'The customer came in today and was served.' : 'The customer asked about rates today but did not come in.';
+    var prompt = 'You are Hassan from AfriDesk Forex Bureau Nairobi. Write a SHORT warm evening message to a customer. ' + situation + ' Last conversation: ' + lastMessages + '. Write in ' + language + ' language ONLY. Maximum 3 sentences. Warm and friendly. If not served gently encourage them to come tomorrow. If served thank them and ask about service quality. End with AfriDesk +254787510515. NO JSON just the message text!';
+    var body = JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 150, messages: [{ role: 'user', content: prompt }] });
+    var options = {
+      hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }
+    };
+    return await new Promise(function(resolve) {
+      var req = https.request(options, function(res) {
+        var data = '';
+        res.on('data', function(c) { data += c; });
+        res.on('end', function() {
+          try { var r = JSON.parse(data); resolve(r.content && r.content[0] ? r.content[0].text : 'Asante kwa kuwasiliana na AfriDesk leo! Tutaonana kesho. +254787510515'); }
+          catch(e) { resolve('Asante kwa kuwasiliana na AfriDesk leo! Tutaonana kesho. +254787510515'); }
+        });
+      });
+      req.on('error', function() { resolve('Asante kwa kuwasiliana na AfriDesk leo! Tutaonana kesho. +254787510515'); });
+      setTimeout(function() { req.destroy(); resolve('Asante kwa kuwasiliana na AfriDesk leo! Tutaonana kesho. +254787510515'); }, 10000);
+      req.write(body); req.end();
+    });
+  } catch(e) { return 'Asante kwa kuwasiliana na AfriDesk leo! Tutaonana kesho. +254787510515'; }
+}
+
+async function sendEveningPing() {
+  try {
+    var nairobi = new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' });
+    console.log('Evening ping starting:', nairobi);
+
+    // Message for customers who were SERVED (accepted/confirmed coming)
+    var servedMsg = 'Habari ya jioni! Asante sana kwa kufika AfriDesk leo. Tulipendezwa sana kukuhudumia. Je, huduma yetu ilikuwa ya kuridhisha? Maoni yako yanasaidia kuboresha huduma zetu. Asubuhi tutakutumia viwango vipya vya kubadilishana. Karibu tena wakati wowote! AfriDesk +254787510515';
+
+    // Message for customers who INQUIRED but did not come
+    var notServedMsg = 'Habari ya jioni! Tulikuwa tunakusubiri leo lakini hujakuja. Viwango vyetu vya kubadilishana bado viko vizuri sana na tuko tayari kukuhudumia. Labda kesho? Tunafungua saa mbili asubuhi tena. Matawi yetu yako Standard Street CBD na Wabera Street CBD. Tutakutumia viwango vipya kesho asubuhi. Tutaonana! AfriDesk +254787510515';
+
+    // Get all customers active today
+    var allCustomers = await queryDB("SELECT customer_id, conversation_id, messages, updated_at FROM conversations WHERE updated_at > NOW() - INTERVAL '24 hours' AND conversation_id IS NOT NULL");
+    
+    var sent = 0;
+    for (var i = 0; i < allCustomers.rows.length; i++) {
+      var cust = allCustomers.rows[i];
+      if (!cust.conversation_id) continue;
+
+      var messages = cust.messages || [];
+      var wasServed = false;
+      var detectedLanguage = 'swahili'; // default
+
+      // Detect language from customer messages
+      var allUserText = messages.filter(function(m) { return m.role === 'user'; }).map(function(m) { return String(m.content || '').toLowerCase(); }).join(' ');
+      
+      // Somali detection
+      if (allUserText.match(/(waxaan|lacag|lacagta|doolar|shilin|aad|haye|maya|mahadsanid|fadlan)/)) {
+        detectedLanguage = 'somali';
+      }
+      // Sheng detection  
+      else if (allUserText.match(/(bro|msee|dame|chizi|poa|boss|moto|rada|fala|niaje|sawa|maze|bana|wueh|noma)/)) {
+        detectedLanguage = 'sheng';
+      }
+      // English detection
+      else if (allUserText.match(/(hello|hi|good|morning|please|thank|want|need|how much|what is)/) && !allUserText.match(/(habari|karibu|asante|nataka|ninahitaji|bei|shilingi)/)) {
+        detectedLanguage = 'english';
+      }
+
+      // Generate language-specific ping using Claude
+      var pingMsg = await generateEveningPing(wasServed, detectedLanguage, messages);
+
+      // Check if customer was served
+      var acceptanceKeywords = ['i accept', 'i agree', 'deal', 'coming now', 'nakuja', 'sawa nimekubali', 'confirmed', 'on my way', 'nataka kuja'];
+      for (var m = 0; m < messages.length; m++) {
+        if (messages[m].role === 'user') {
+          var msgLower = String(messages[m].content || '').toLowerCase();
+          if (acceptanceKeywords.some(function(kw) { return msgLower.includes(kw); })) {
+            wasServed = true;
+            break;
+          }
+        }
+      }
+      
+      try {
+        await sendChatwootMessage(cust.conversation_id, pingMsg, false);
+        sent++;
+        console.log(wasServed ? 'Served ping sent to:' : 'Not-served ping sent to:', cust.customer_id);
+        await new Promise(function(r) { setTimeout(r, 1000); });
+      } catch(e) { console.log('Evening ping error:', e.message); }
+    }
+    console.log('Evening ping complete! Sent to:', sent, 'customers');
+  } catch(e) { console.log('Evening ping failed:', e.message); }
+}
+
 async function sendMorningBroadcast() {
   try {
     var nairobi = new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' });
@@ -360,108 +451,7 @@ var server = http.createServer(function(req, res) {
     res.writeHead(200); res.end('AfriDesk API Running!'); return;
   }
 
-  // WatchParty AI test endpoint
-  if (req.method === 'GET' && req.url === '/watchparty-test') {
-    res.writeHead(200, {'Content-Type': 'application/json'});
-    var apiKey = process.env.FOOTBALL_API_KEY || '';
-    if (!apiKey) { res.end(JSON.stringify({error: 'No FOOTBALL_API_KEY set'})); return; }
-    
-    // Test API connection
-    var options = {
-      hostname: 'v3.football.api-sports.io',
-      path: '/status',
-      method: 'GET',
-      headers: { 'x-apisports-key': apiKey }
-    };
-    var apiReq = https.request(options, function(apiRes) {
-      var data = '';
-      apiRes.on('data', function(chunk) { data += chunk; });
-      apiRes.on('end', function() {
-        try {
-          var result = JSON.parse(data);
-          res.end(JSON.stringify({
-            success: true,
-            account: result.response && result.response.account,
-            requests: result.response && result.response.requests
-          }));
-        } catch(e) { res.end(JSON.stringify({error: 'Parse error', raw: data.substring(0, 200)})); }
-      });
-    });
-    apiReq.on('error', function(e) { res.end(JSON.stringify({error: e.message})); });
-    apiReq.end();
-    return;
-  }
-
-  // WatchParty live matches endpoint
-  if (req.method === 'GET' && req.url === '/watchparty-live') {
-    res.writeHead(200, {'Content-Type': 'application/json'});
-    var apiKey = process.env.FOOTBALL_API_KEY || '';
-    if (!apiKey) { res.end(JSON.stringify({error: 'No FOOTBALL_API_KEY set'})); return; }
-    
-    var options = {
-      hostname: 'v3.football.api-sports.io',
-      path: '/fixtures?live=all',
-      method: 'GET',
-      headers: { 'x-apisports-key': apiKey }
-    };
-    var apiReq = https.request(options, function(apiRes) {
-      var data = '';
-      apiRes.on('data', function(chunk) { data += chunk; });
-      apiRes.on('end', function() {
-        try {
-          var result = JSON.parse(data);
-          var matches = (result.response || []).map(function(m) {
-            return {
-              home: m.teams.home.name,
-              away: m.teams.away.name,
-              score: m.goals.home + '-' + m.goals.away,
-              minute: m.fixture.status.elapsed,
-              fixture_id: m.fixture.id
-            };
-          });
-          res.end(JSON.stringify({live_matches: matches, count: matches.length}));
-        } catch(e) { res.end(JSON.stringify({error: 'Parse error', raw: data.substring(0, 200)})); }
-      });
-    });
-    apiReq.on('error', function(e) { res.end(JSON.stringify({error: e.message})); });
-    apiReq.end();
-    return;
-  }
-
-  // WatchParty upcoming EPL matches
-  if (req.method === 'GET' && req.url === '/watchparty-epl') {
-    res.writeHead(200, {'Content-Type': 'application/json'});
-    var apiKey = process.env.FOOTBALL_API_KEY || '';
-    if (!apiKey) { res.end(JSON.stringify({error: 'No FOOTBALL_API_KEY set'})); return; }
-    
-    var options = {
-      hostname: 'v3.football.api-sports.io',
-      path: '/fixtures?league=39&season=2026&next=10',
-      method: 'GET',
-      headers: { 'x-apisports-key': apiKey }
-    };
-    var apiReq = https.request(options, function(apiRes) {
-      var data = '';
-      apiRes.on('data', function(chunk) { data += chunk; });
-      apiRes.on('end', function() {
-        try {
-          var result = JSON.parse(data);
-          var matches = (result.response || []).map(function(m) {
-            return {
-              home: m.teams.home.name,
-              away: m.teams.away.name,
-              date: m.fixture.date,
-              fixture_id: m.fixture.id
-            };
-          });
-          res.end(JSON.stringify({epl_matches: matches, count: matches.length}));
-        } catch(e) { res.end(JSON.stringify({error: 'Parse error', raw: data.substring(0, 200)})); }
-      });
-    });
-    apiReq.on('error', function(e) { res.end(JSON.stringify({error: e.message})); });
-    apiReq.end();
-    return;
-  }
+  // WatchParty moved to separate server — watchparty-production-d9f0.up.railway.app
   if (req.method === 'GET' && req.url === '/broadcast-now') {
     res.writeHead(200); res.end('Broadcast triggered!');
     sendMorningBroadcast(); return;
@@ -739,31 +729,41 @@ server.listen(PORT, async function() {
     }, 5 * 60 * 1000);
   }
 
-  // Track last broadcast date
+  // Track last broadcast and ping dates
   var lastBroadcastDate = '';
+  var lastEveningPingDate = '';
 
-  // Check every 5 minutes if broadcast should fire
+  // Check every 5 minutes
   setInterval(async function() {
     var now = new Date();
     var nairobi = new Date(now.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
     var hour = nairobi.getHours();
     var minute = nairobi.getMinutes();
     var today = nairobi.toDateString();
-    // Fire between 9:00AM and 9:30AM if not already sent today
+
+    // 9AM morning broadcast
     if (hour === 9 && minute <= 30 && lastBroadcastDate !== today) {
       console.log('Morning broadcast time! Firing...');
       lastBroadcastDate = today;
       await sendMorningBroadcast();
     }
+
+    // 6PM evening ping — keep windows open for tomorrow
+    if (hour === 18 && minute <= 30 && lastEveningPingDate !== today) {
+      console.log('Evening ping time! Keeping windows open...');
+      lastEveningPingDate = today;
+      await sendEveningPing();
+    }
   }, 5 * 60 * 1000);
-  console.log('Morning broadcast scheduler started! Checks every 5 minutes.');
-  // Also check immediately on startup in case we missed 9AM
+  console.log('Broadcast scheduler started! Checks every 5 minutes.');
+
+  // Check on startup
   var nowCheck = new Date();
   var nairobiCheck = new Date(nowCheck.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
   var hourCheck = nairobiCheck.getHours();
   var minuteCheck = nairobiCheck.getMinutes();
   if (hourCheck === 9 && minuteCheck <= 30) {
-    console.log('Startup during broadcast window - firing immediately!');
+    console.log('Startup during morning broadcast window!');
     sendMorningBroadcast();
     lastBroadcastDate = nairobiCheck.toDateString();
   }
